@@ -1,0 +1,59 @@
+{
+  "name": "visasteps",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint",
+    "db:migrate": "prisma migrate dev",
+    "db:seed": "prisma db seed",
+    "db:reset": "prisma migrate reset --force",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "setup:email": "node scripts/setup-email.mjs",
+    "email:test": "tsx --env-file=.env scripts/send-test-email.mts",
+    "setup:onedrive": "tsx --env-file=.env scripts/onedrive.mts setup",
+    "onedrive:check": "tsx --env-file=.env scripts/onedrive.mts check",
+    "onedrive:folders": "tsx --env-file=.env scripts/onedrive.mts folders",
+    "admin:create": "tsx --env-file=.env scripts/create-admin.mts",
+    "test:e2e": "playwright test",
+    "init:production": "tsx --env-file=.env scripts/init-production.mts",
+    "checklists:sync": "tsx --env-file=.env scripts/sync-checklists.mts",
+    "backup:now": "tsx --env-file=.env scripts/backup.mts"
+  },
+  "dependencies": {
+    "@prisma/client": "^6.19.3",
+    "bcryptjs": "^3.0.3",
+    "dotenv": "^18.0.8",
+    "file-type": "^22.2.0",
+    "heic-convert": "^2.1.0",
+    "next": "16.4.2",
+    "nodemailer": "^10.1.2",
+    "otpauth": "^9.5.2",
+    "pdf-lib": "^1.17.1",
+    "qrcode": "^1.5.4",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.64.1",
+    "@types/bcryptjs": "^2.4.6",
+    "@types/node": "^24.19.2",
+    "@types/nodemailer": "^8.0.2",
+    "@types/qrcode": "^1.5.6",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "eslint": "^9",
+    "eslint-config-next": "16.4.2",
+    "prisma": "^6.19.3",
+    "tsx": "^4.23.15",
+    "typescript": "^5",
+    "vitest": "^5.0.5"
+  },
+  "prisma": {
+    "seed": "tsx prisma/seed.ts"
+  }
+}

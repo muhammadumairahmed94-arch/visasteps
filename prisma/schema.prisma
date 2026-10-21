@@ -1,0 +1,251 @@
+generator client {
+  provider      = "prisma-client-js"
+  // native = this Mac; the others = the Linux server (Intel/AMD) and Docker on Apple Silicon
+  binaryTargets = ["native", "debian-openssl-3.0.x", "linux-arm64-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  ADMIN
+  CASEWORKER
+}
+
+enum DocStatus {
+  NEED // To do
+  SENT // Checking
+  OK // Done
+  REDO // Please redo
+}
+
+enum ActorType {
+  CLIENT
+  USER
+  SYSTEM
+}
+
+model Firm {
+  id             String     @id @default(cuid())
+  name           String
+  phone          String
+  whatsapp       String? // digits only, for wa.me links
+  oneDriveConfig Json?
+  nextCaseNumber Int        @default(1000)
+  createdAt      DateTime   @default(now())
+  users          User[]
+  clients        Client[]
+  routes         Route[]
+  auditLogs      AuditLog[]
+}
+
+model User {
+  id            String    @id @default(cuid())
+  firmId        String
+  firm          Firm      @relation(fields: [firmId], references: [id])
+  role          Role      @default(CASEWORKER)
+  name          String
+  email         String    @unique
+  passwordHash  String?
+  // Authenticator-app 2FA. The secret is encrypted with AUTH_SECRET.
+  totpSecret    String?
+  totpEnabledAt DateTime?
+  totpLastStep  Int? // last accepted 30-second step, so a code cannot be reused
+  recoveryCodes String[] // hashed, single use
+  failedLogins  Int       @default(0)
+  disabledAt    DateTime? // removed from the team: cannot sign in, history kept
+  lockedUntil   DateTime?
+  ssoId         String?
+  createdAt     DateTime  @default(now())
+  clients       Client[]
+  sessions      Session[]
+  invites       Invite[]
+}
+
+model Client {
+  id               String           @id @default(cuid())
+  firmId           String
+  firm             Firm             @relation(fields: [firmId], references: [id])
+  // Names and mobile are filled in by the client when they create their account
+  firstName        String?
+  lastName         String?
+  mobile           String? // normalised, e.g. +447700900121
+  email            String           @unique // also the client's sign-in name
+  passwordHash     String?
+  accountCreatedAt DateTime?
+  caseRef          String
+  routeId          String
+  route            Route            @relation(fields: [routeId], references: [id])
+  caseworkerId     String
+  caseworker       User             @relation(fields: [caseworkerId], references: [id])
+  remindersPaused  Boolean          @default(false)
+  reminderCount    Int              @default(0) // "missing documents" reminders sent (max 5)
+  lastReminderAt   DateTime?
+  closedAt         DateTime? // case closed: client cannot sign in, no reminders; data kept
+  failedLogins     Int              @default(0)
+  lockedUntil      DateTime?
+  createdAt        DateTime         @default(now())
+  documents        ClientDocument[]
+  invites          Invite[]
+  sessions         Session[]
+
+  @@unique([firmId, caseRef])
+}
+
+model Route {
+  id           String          @id @default(cuid())
+  firmId       String
+  firm         Firm            @relation(fields: [firmId], references: [id])
+  name         String
+  // Folders created for every case on this route that hold no checklist items
+  extraFolders String[]
+  items        ChecklistItem[]
+  clients      Client[]
+
+  @@unique([firmId, name])
+}
+
+model ChecklistItem {
+  id         String           @id @default(cuid())
+  routeId    String
+  route      Route            @relation(fields: [routeId], references: [id])
+  folder     String // e.g. "01 Identity" — also decides group order
+  groupLabel String // client-facing, e.g. "Identity"
+  title      String
+  why        String
+  typeKey    String // used in file names, e.g. "Passport"
+  required   Boolean          @default(true)
+  order      Int
+  archivedAt DateTime? // removed from the route; kept for clients who already sent it
+  documents  ClientDocument[]
+}
+
+model ClientDocument {
+  id              String        @id @default(cuid())
+  clientId        String
+  client          Client        @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  checklistItemId String
+  checklistItem   ChecklistItem @relation(fields: [checklistItemId], references: [id])
+  status          DocStatus     @default(NEED)
+  note            String?
+  redoSince       DateTime? // when "Please redo" was set
+  redoRemindedAt  DateTime?
+  updatedAt       DateTime      @updatedAt
+  files           FileUpload[]
+
+  @@unique([clientId, checklistItemId])
+}
+
+model FileUpload {
+  id               String         @id @default(cuid())
+  clientDocumentId String
+  clientDocument   ClientDocument @relation(fields: [clientDocumentId], references: [id], onDelete: Cascade)
+  originalName     String
+  storedName       String
+  folderPath       String         @default("") // where it lives (or will), segments joined by "/"
+  oneDriveItemId   String? // storage item id once saved (a relative path in fake mode)
+  webUrl           String? // "Open in SharePoint" link
+  storageStatus    StorageStatus  @default(SAVED)
+  sizeBytes        Int
+  sha256           String
+  uploadedAt       DateTime       @default(now())
+  supersededAt     DateTime?
+  jobs             StorageJob[]
+}
+
+enum LinkKind {
+  SETUP // "Create your account" — 7 days
+  RESET // "Choose a new password" — 1 hour
+  STAFF // new caseworker: "Set your password" — 7 days
+}
+
+/**
+ * Single-use links sent by email.
+ */
+model Invite {
+  id        String    @id @default(cuid())
+  kind      LinkKind  @default(SETUP)
+  // One of clientId (client account links) or userId (staff "set your password" links)
+  clientId  String?
+  client    Client?   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  userId    String?
+  user      User?     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+}
+
+model Session {
+  id         String       @id @default(cuid())
+  tokenHash  String       @unique
+  clientId   String?
+  client     Client?      @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  userId     String?
+  user       User?        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  stage      SessionStage @default(FULL)
+  expiresAt  DateTime
+  lastSeenAt DateTime     @default(now())
+  createdAt  DateTime     @default(now())
+}
+
+model AuditLog {
+  id        String    @id @default(cuid())
+  firmId    String
+  firm      Firm      @relation(fields: [firmId], references: [id])
+  actorType ActorType
+  actorId   String?
+  action    String
+  targetId  String?
+  ip        String?
+  at        DateTime  @default(now())
+
+  @@index([firmId, at])
+}
+
+enum SessionStage {
+  FULL
+  MFA // password accepted, waiting for the authenticator code (staff only)
+}
+
+/**
+ * Fixed-window counters for rate limiting. Kept in the database so limits hold across servers.
+ */
+model RateLimit {
+  key     String   @id
+  count   Int
+  resetAt DateTime
+}
+
+enum StorageStatus {
+  SAVED // confirmed in OneDrive / SharePoint
+  PENDING // held encrypted on the server, being retried
+  FAILED // retries used up — caseworker can retry by hand
+}
+
+enum StorageJobKind {
+  UPLOAD
+  MOVE // to "_Old versions" after a redo
+}
+
+/**
+ * Storage work that could not be done straight away (Microsoft unreachable). Processed oldest first.
+ */
+model StorageJob {
+  id            String         @id @default(cuid())
+  kind          StorageJobKind
+  fileUploadId  String
+  fileUpload    FileUpload     @relation(fields: [fileUploadId], references: [id], onDelete: Cascade)
+  folderPath    String // target folder
+  name          String // target file name
+  tempPath      String? // encrypted copy waiting to be uploaded (UPLOAD only)
+  attempts      Int            @default(0)
+  lastError     String?
+  nextAttemptAt DateTime       @default(now())
+  lockedUntil   DateTime?
+  createdAt     DateTime       @default(now())
+
+  @@index([nextAttemptAt])
+}

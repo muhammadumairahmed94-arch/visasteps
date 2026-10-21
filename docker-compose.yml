@@ -1,0 +1,90 @@
+# UHA Legal client portal — the whole live setup on one 2 GB server.
+# Images are built on the Mac and copied over by scripts/deploy.sh (the server is too small to build them).
+# On the server this folder holds a `.env` with the production settings (see deploy/production.env.example).
+#   docker compose up -d                              start / update everything
+#   docker compose run --rm tools npm run <script>    one-off commands (init:production, admin:create, setup:onedrive)
+
+x-app-env: &app-env
+  env_file: .env
+  environment:
+    DATABASE_URL: postgresql://visasteps:${POSTGRES_PASSWORD}@db:5432/visasteps
+    CLAMAV_HOST: clamav
+    CLAMAV_PORT: "3310"
+    VIRUS_SCAN: clamav
+    UPLOAD_QUEUE_DIR: /data/queue
+    LOCAL_STORAGE_DIR: /data/local-storage
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: visasteps
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: visasteps
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U visasteps"]
+      interval: 5s
+      retries: 20
+
+  clamav:
+    image: clamav/clamav-debian:stable # official ClamAV image; builds for Intel/AMD and ARM
+    restart: unless-stopped
+    volumes:
+      - clamdb:/var/lib/clamav
+      - ./deploy/clamd.conf:/etc/clamav/clamd.conf:ro # tuned for low memory
+    healthcheck:
+      test: ["CMD", "clamdcheck.sh"]
+      interval: 60s
+      start_period: 300s # first start downloads the virus database
+
+  migrate:
+    <<: *app-env
+    image: visasteps-tools:latest
+    build: { context: ., target: tools }
+    command: ["npx", "prisma", "migrate", "deploy"]
+    depends_on: { db: { condition: service_healthy } }
+    restart: "no"
+
+  app:
+    <<: *app-env
+    image: visasteps-app:latest
+    build: { context: ., target: runner }
+    restart: unless-stopped
+    volumes: [appdata:/data]
+    depends_on:
+      db: { condition: service_healthy }
+      migrate: { condition: service_completed_successfully }
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports: ["80:80", "443:443", "443:443/udp"]
+    environment: { DOMAIN: "${DOMAIN:?set DOMAIN in .env}" }
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on: [app]
+
+  backup: # nightly 02:30 UK: encrypted database backup → OneDrive/Apps/…/Backups
+    <<: *app-env
+    image: visasteps-tools:latest
+    command: ["sh", "deploy/backup-loop.sh"]
+    restart: unless-stopped
+    depends_on: { db: { condition: service_healthy } }
+
+  tools:
+    <<: *app-env
+    image: visasteps-tools:latest
+    profiles: [tools]
+    volumes: [appdata:/data]
+    depends_on: { db: { condition: service_healthy } }
+
+volumes:
+  pgdata:
+  clamdb:
+  appdata:
+  caddy_data:
+  caddy_config:

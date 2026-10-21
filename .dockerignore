@@ -1,0 +1,14 @@
+node_modules
+.next
+.env
+.env.*
+!.env.example
+local-storage
+upload-queue
+e2e-mail
+e2e-storage
+e2e-queue
+test-results
+playwright-report
+.claude
+*.tsbuildinfo

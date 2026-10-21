@@ -1,0 +1,13 @@
+# HTTPS for the portal: Caddy gets and renews the certificate from Let's Encrypt automatically.
+{$DOMAIN} {
+	encode gzip
+	request_body {
+		max_size 120MB # several 20 MB files in one upload
+	}
+	header -Server
+	reverse_proxy app:3000
+	log {
+		output stdout
+		format console
+	}
+}
