@@ -21,8 +21,8 @@ export function ukHour(d = new Date()) {
 }
 export const inSendingHours = (d = new Date()) => ukHour(d) >= 9 && ukHour(d) < 19;
 
-/** Required, still-current checklist items the client has not sent. */
-const missingWhere = { status: "NEED" as const, checklistItem: { required: true, archivedAt: null } };
+/** Required, still-current items not yet sent and not flagged by the client as "I don't have this". */
+const missingWhere = { status: "NEED" as const, missingAt: null, checklistItem: { required: true, archivedAt: null } };
 
 export async function sendDueReminders(now = new Date()): Promise<{ missing: number; redo: number }> {
   if (!inSendingHours(now)) return { missing: 0, redo: 0 };

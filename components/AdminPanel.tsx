@@ -205,6 +205,11 @@ function Firm({ data, run }: { data: AdminView; run: Run }) {
           <input id="f-wa" name="whatsapp" className="input" inputMode="numeric" defaultValue={data.firm.whatsapp} aria-describedby="f-wa-hint" />
           <p id="f-wa-hint" className="hint">Digits only with country code, e.g. 923341161664. Leave empty to hide the WhatsApp button.</p>
         </div>
+        <div className="field">
+          <label htmlFor="f-days">Days to review documents</label>
+          <input id="f-days" name="reviewDays" type="number" className="input" min="1" max="30" defaultValue={data.firm.reviewDays} required aria-describedby="f-days-hint" />
+          <p id="f-days-hint" className="hint">Clients see: &ldquo;Your caseworker usually checks documents within N working days.&rdquo;</p>
+        </div>
         <button className="big" disabled={busy}>{busy ? "Saving…" : "Save"}</button>
       </form>
       <section className="detail">

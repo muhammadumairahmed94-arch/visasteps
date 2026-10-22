@@ -283,7 +283,22 @@ function CaseView({
       />
     );
   } else if (view.tab === "review") body = review.length ? rows(review) : <p className="muted">Nothing to review right now.</p>;
-  else if (view.tab === "missing") body = missingDocs.length ? rows(missingDocs) : <p className="muted">Nothing missing.</p>;
+  else if (view.tab === "missing")
+    body = missingDocs.length ? (
+      <div className="list">
+        {missingDocs.map((d) => (
+          <Row key={d.id} status={d.status} labels={STAFF_LABEL} onClick={() => to({ doc: d.id, group: undefined })}>
+            <span>
+              {d.title}
+              {!d.required && <span className="muted"> (optional)</span>}
+              {d.missingAt && <><br /><span className="muted">Client said: {d.missingReason}</span></>}
+            </span>
+          </Row>
+        ))}
+      </div>
+    ) : (
+      <p className="muted">Nothing missing.</p>
+    );
   else if (view.tab === "folders") {
     const g = view.group ? data.groups.find((x) => x.id === view.group) : undefined;
     body = g ? (
@@ -416,6 +431,13 @@ function DocReview({ doc, folder, onBack, onDone, onRefresh }: { doc: Doc; folde
         <h2 data-focus tabIndex={-1}>{doc.title}</h2>
         <StatusPill status={doc.status} labels={STAFF_LABEL} />
         {doc.status === "REDO" && doc.note && <div className="note"><b>You asked:</b> {doc.note}</div>}
+        {doc.missingAt && (
+          <div className="note">
+            <b>Client said they cannot find this document</b>
+            <p>{doc.missingReason}</p>
+            <RespondMissing docId={doc.id} onDone={(msg) => onDone(msg)} />
+          </div>
+        )}
         {doc.files.length ? (
           doc.files.map((f) => <FileRow key={f.id} file={f} folder={folder} onSaved={onRefresh} />)
         ) : (
@@ -441,6 +463,37 @@ function DocReview({ doc, folder, onBack, onDone, onRefresh }: { doc: Doc; folde
               </div>
             </>
           ))}
+      </div>
+    </>
+  );
+}
+
+function RespondMissing({ docId, onDone }: { docId: string; onDone: (msg: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const [note, setNote] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function submit() {
+    setBusy(true);
+    setError(null);
+    const r = await api<{ message: string }>(`/api/staff/documents/${docId}/missing`, { method: "POST", json: { note } });
+    setBusy(false);
+    if (!r.ok) return setError(r.error);
+    onDone(r.data.message);
+  }
+
+  if (!open)
+    return <button type="button" className="ghost" onClick={() => setOpen(true)}>Respond to client</button>;
+
+  return (
+    <>
+      <label htmlFor={`rmiss-${docId}`} className="sr-only">Note to client (optional)</label>
+      <textarea id={`rmiss-${docId}`} rows={3} value={note} onChange={(e) => setNote(e.target.value)} placeholder="Optional: write a note to the client" autoFocus />
+      {error && <p className="error" role="alert">{error}</p>}
+      <div className="btns">
+        <button type="button" className="ghost" disabled={busy} onClick={() => setOpen(false)}>Cancel</button>
+        <button type="button" className="big" disabled={busy} onClick={submit}>{busy ? "Sending…" : "Reply and clear flag"}</button>
       </div>
     </>
   );

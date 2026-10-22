@@ -34,6 +34,7 @@ model Firm {
   whatsapp       String? // digits only, for wa.me links
   oneDriveConfig Json?
   nextCaseNumber Int        @default(1000)
+  reviewDays     Int        @default(2)
   createdAt      DateTime   @default(now())
   users          User[]
   clients        Client[]
@@ -136,6 +137,9 @@ model ClientDocument {
   note            String?
   redoSince       DateTime? // when "Please redo" was set
   redoRemindedAt  DateTime?
+  missingReason   String? // set by client via "I can't find this"
+  missingAt       DateTime? // when missingReason was saved; null = not flagged
+  missingResponse String? // caseworker's reply, shown on the client portal
   updatedAt       DateTime      @updatedAt
   files           FileUpload[]
 

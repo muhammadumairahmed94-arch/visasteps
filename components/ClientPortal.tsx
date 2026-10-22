@@ -7,7 +7,7 @@ import { CLIENT_LABEL, Page, Row, Tabs, api, useHashView, useToast, type Status 
 
 type Tab = "docs" | "visa" | "me" | "help";
 type View = { tab: Tab; group?: string; doc?: string; sub?: string };
-type Doc = ClientPortalView["groups"][number]["docs"][number] & { status: Status; dates: string | null; exampleImage: string | null; howToGet: string | null };
+type Doc = ClientPortalView["groups"][number]["docs"][number] & { status: Status; dates: string | null; exampleImage: string | null; howToGet: string | null; missingAt: string | null; missingResponse: string | null };
 
 const MAX_BYTES = 20 * 1024 * 1024;
 const sent = (s: Status) => s === "SENT" || s === "OK";
@@ -81,10 +81,15 @@ export default function ClientPortal({ token: linkToken }: { token?: string }) {
         <DocDetail
           doc={doc}
           backLabel={group.label}
+          reviewDays={data.firm.reviewDays}
           onBack={() => go({ tab: "docs", group: group.id })}
           onSent={async (msg) => {
             await load();
             go({ tab: "docs", group: group.id });
+            toast(msg);
+          }}
+          onMissing={async (msg) => {
+            await load();
             toast(msg);
           }}
         />
@@ -215,14 +220,19 @@ export default function ClientPortal({ token: linkToken }: { token?: string }) {
   );
 }
 
-function DocDetail({ doc, backLabel, onBack, onSent }: {
+function DocDetail({ doc, backLabel, reviewDays, onBack, onSent, onMissing }: {
   doc: Doc;
   backLabel: string;
+  reviewDays: number;
   onBack: () => void;
   onSent: (msg: string) => void;
+  onMissing: (msg: string) => void;
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [reportingMissing, setReportingMissing] = useState(false);
+  const [missingReason, setMissingReason] = useState("");
+  const [missingBusy, setMissingBusy] = useState(false);
 
   async function onFiles(e: ChangeEvent<HTMLInputElement>) {
     const files = [...(e.target.files ?? [])];
@@ -237,6 +247,18 @@ function DocDetail({ doc, backLabel, onBack, onSent }: {
     setBusy(false);
     if (!r.ok) return setError(r.error);
     onSent(r.data.message);
+  }
+
+  async function submitMissing() {
+    if (!missingReason.trim()) return setError("Please tell us why in a few words.");
+    setMissingBusy(true);
+    setError(null);
+    const r = await api<{ message: string }>(`/api/client/documents/${doc.id}/missing`, { method: "POST", json: { reason: missingReason } });
+    setMissingBusy(false);
+    if (!r.ok) return setError(r.error);
+    setReportingMissing(false);
+    setMissingReason("");
+    onMissing(r.data.message);
   }
 
   return (
@@ -264,6 +286,16 @@ function DocDetail({ doc, backLabel, onBack, onSent }: {
             <b>Caseworker note:</b> {doc.note}
           </div>
         )}
+        {doc.missingAt && (
+          <div className="note">
+            <b>We have told your caseworker.</b> They will be in touch soon. You can still upload the document if you find it.
+          </div>
+        )}
+        {doc.missingResponse && (
+          <div className="note">
+            <b>Your caseworker replied:</b> {doc.missingResponse}
+          </div>
+        )}
         {doc.files.length > 0 && (
           <div className="files">
             {doc.files.map((f, i) => (
@@ -282,6 +314,32 @@ function DocDetail({ doc, backLabel, onBack, onSent }: {
             </label>
             {busy && <p className="sr-only" role="status">Uploading</p>}
             <p className="muted">Not sure if it&apos;s right? Upload it anyway and our team will check it.</p>
+            <p className="muted">
+              After you send a document, your caseworker usually checks it within {reviewDays} working {reviewDays === 1 ? "day" : "days"}.
+            </p>
+            {!doc.missingAt && !doc.missingResponse && !reportingMissing && (
+              <button type="button" className="link" onClick={() => setReportingMissing(true)}>
+                I can&apos;t find this document
+              </button>
+            )}
+            {reportingMissing && (
+              <div className="missing-form">
+                <label htmlFor="missing-reason">Tell us why, in a few words</label>
+                <input
+                  id="missing-reason"
+                  className="input"
+                  value={missingReason}
+                  onChange={(e) => setMissingReason(e.target.value)}
+                  placeholder="e.g. I do not have a payslip from that period"
+                  maxLength={500}
+                  autoFocus
+                />
+                <div className="btns">
+                  <button type="button" className="ghost" disabled={missingBusy} onClick={() => { setReportingMissing(false); setMissingReason(""); setError(null); }}>Cancel</button>
+                  <button type="button" className="big" disabled={missingBusy} onClick={submitMissing}>{missingBusy ? "Sending…" : "Tell my caseworker"}</button>
+                </div>
+              </div>
+            )}
           </>
         )}
       </div>

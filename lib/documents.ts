@@ -43,7 +43,7 @@ export async function clientPortalView(clientId: string) {
   return {
     firstName: c.firstName,
     route: c.route.name,
-    firm: { name: c.firm.name, phone: c.firm.phone, whatsapp: c.firm.whatsapp },
+    firm: { name: c.firm.name, phone: c.firm.phone, whatsapp: c.firm.whatsapp, reviewDays: c.firm.reviewDays },
     details: { name: `${c.firstName} ${c.lastName}`, mobile: c.mobile, email: c.email },
     groups: groupItems(docs).map((g) => ({
       id: g.folder,
@@ -58,6 +58,8 @@ export async function clientPortalView(clientId: string) {
         required: i.required,
         status: i.doc.status,
         note: i.doc.status === "REDO" ? i.doc.note : null,
+        missingAt: i.doc.missingAt ? i.doc.missingAt.toISOString() : null,
+        missingResponse: i.doc.missingResponse ?? null,
         files: i.doc.files.map((f) => ({ orig: f.originalName, date: ukDate(f.uploadedAt) })),
       })),
     })),
@@ -118,6 +120,8 @@ export async function staffCaseView(u: User, clientId: string) {
         required: i.required,
         status: i.doc.status,
         note: i.doc.note,
+        missingReason: i.doc.missingReason ?? null,
+        missingAt: i.doc.missingAt ? i.doc.missingAt.toISOString() : null,
         files: i.doc.files.map((f) => ({
           id: f.id,
           storedName: f.storedName,
@@ -199,7 +203,7 @@ export async function uploadDocument(clientId: string, docId: string, files: Fil
     await audit({ firmId: client.firmId, actorType: "CLIENT", actorId: client.id, action: "document.upload", targetId: upload.id });
   }
 
-  await db.clientDocument.update({ where: { id: doc.id }, data: { status: "SENT", note: null, redoSince: null, redoRemindedAt: null } });
+  await db.clientDocument.update({ where: { id: doc.id }, data: { status: "SENT", note: null, redoSince: null, redoRemindedAt: null, missingReason: null, missingAt: null, missingResponse: null } });
   await sendSafely({
     to: client.caseworker.email,
     brand: client.firm.name,
@@ -207,7 +211,7 @@ export async function uploadDocument(clientId: string, docId: string, files: Fil
     text: `${checked.length} file${checked.length === 1 ? "" : "s"} ready to review in ${item.folder}.`,
     action: { label: "Review in portal", url: `${appUrl()}/staff#c/${client.id}/review` },
   });
-  return { ok: true };
+  return { ok: true, reviewDays: client.firm.reviewDays };
 }
 
 /* ---------- caseworker review ---------- */
@@ -243,6 +247,53 @@ export async function reviewDocument(u: User, docId: string, action: "approve" |
     if (!sent) return { warning: "Saved, but the email to the client could not be sent. Please contact the client directly." };
   }
   return {};
+}
+
+/* ---------- client "I don't have this" ---------- */
+
+export async function reportMissing(clientId: string, docId: string, reason: string) {
+  const trimmed = reason.trim().slice(0, 500);
+  if (!trimmed) throw new UserError("Please tell us why in a few words.");
+  const doc = await db.clientDocument.findFirst({
+    where: { id: docId, clientId },
+    include: { checklistItem: true, client: { include: { caseworker: true, firm: true } } },
+  });
+  if (!doc) throw new UserError("We could not find this document. Please go back and try again.");
+  if (doc.client.closedAt) throw new UserError("This case is closed. Please contact us if you have questions.");
+  if (doc.status !== "NEED") throw new UserError("You have already sent this document.");
+  await db.clientDocument.update({ where: { id: doc.id }, data: { missingReason: trimmed, missingAt: new Date() } });
+  await audit({ firmId: doc.client.firmId, actorType: "CLIENT", actorId: clientId, action: "document.missing", targetId: doc.id });
+  const { client, checklistItem: item } = doc;
+  await sendSafely({
+    to: client.caseworker.email,
+    brand: client.firm.name,
+    subject: `${fullName(client)} (${client.caseRef}) cannot find: ${item.title}`,
+    text: `${fullName(client)} has left a note about ${item.title}. Open the portal to read it and reply.`,
+    action: { label: "View in portal", url: `${appUrl()}/staff#c/${client.id}/missing` },
+  });
+}
+
+/* ---------- caseworker response to "I don't have this" ---------- */
+
+export async function respondToMissing(u: User, docId: string, note: string) {
+  const doc = await db.clientDocument.findFirst({
+    where: { id: docId, client: visibleCases(u) },
+    include: { checklistItem: true, client: { include: { firm: true } } },
+  });
+  if (!doc) throw new UserError("Document not found.");
+  if (!doc.missingAt) throw new UserError("This document has not been flagged as missing.");
+  const trimmed = note?.trim() || null;
+  await db.clientDocument.update({ where: { id: doc.id }, data: { missingReason: null, missingAt: null, missingResponse: trimmed } });
+  await audit({ firmId: u.firmId, actorType: "USER", actorId: u.id, action: "document.missing.respond", targetId: doc.id });
+  if (trimmed) {
+    await sendSafely({
+      to: doc.client.email,
+      brand: doc.client.firm.name,
+      subject: `${doc.client.firm.name}: your caseworker left a note about ${doc.checklistItem.title}`,
+      text: `Your caseworker has left a note about ${doc.checklistItem.title}. Open the portal to read it.`,
+      action: { label: "Open client portal", url: `${appUrl()}/` },
+    });
+  }
 }
 
 export async function staffReadFile(u: User, fileId: string) {

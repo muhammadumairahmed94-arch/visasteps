@@ -81,7 +81,7 @@ export default function ClientSignIn({ token, onDone }: { token?: string; onDone
               Mobile number <span className="optional">(optional)</span>
             </label>
             <input id="mobile" name="mobile" className="input" type="tel" inputMode="tel" autoComplete="tel" aria-describedby="mobile-hint" />
-            <p id="mobile-hint" className="hint">Used for text updates about documents.</p>
+            <p id="mobile-hint" className="hint">Optional. Your caseworker may call you on this number.</p>
           </div>
           <Password label="Choose a password" autoComplete="new-password" hint="At least 8 characters." />
           {err}

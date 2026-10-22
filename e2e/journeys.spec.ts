@@ -82,7 +82,7 @@ test.describe.serial("main journeys", () => {
     await client.getByRole("button", { name: /^Identity/ }).click();
     await client.getByRole("button", { name: /^Passport/ }).click();
     await client.locator("#up").setInputFiles(fixture("passport.png"));
-    await expect(client.getByText("Document received. Thank you.")).toBeVisible();
+    await expect(client.getByText(/Received\. Your caseworker usually checks/)).toBeVisible();
     await expect(client.getByRole("button", { name: /^Passport.*Checking/ })).toBeVisible();
 
     // Caseworker approves
@@ -106,7 +106,7 @@ test.describe.serial("main journeys", () => {
     await client.getByRole("button", { name: /^English and TB test/ }).click();
     await client.getByRole("button", { name: /^English language evidence/ }).click();
     await client.locator("#up").setInputFiles(fixture("certificate.png"));
-    await expect(client.getByText("Document received. Thank you.")).toBeVisible();
+    await expect(client.getByText(/Received\. Your caseworker usually checks/)).toBeVisible();
 
     // Caseworker asks for it again, with a note
     await staff.goto(`/staff#c/${clientCaseId}/review`);
@@ -128,7 +128,7 @@ test.describe.serial("main journeys", () => {
     await expect(client.getByText("Caseworker note:")).toBeVisible();
     await expect(client.getByText("The photo is blurred. Please upload a clearer copy.")).toBeVisible();
     await client.locator("#up").setInputFiles(fixture("certificate.png"));
-    await expect(client.getByText("Document received. Thank you.")).toBeVisible();
+    await expect(client.getByText(/Received\. Your caseworker usually checks/)).toBeVisible();
 
     // Storage: new file in place, old one moved to "_Old versions" (never deleted)
     const clientDir = readdirSync(path.join(E2E.LOCAL_STORAGE_DIR, "Clients")).find((d) => d.startsWith("Client_Test_"))!;
@@ -263,6 +263,70 @@ test.describe.serial("main journeys", () => {
     // How-to text is shown
     await expect(client.getByText("How to get this")).toBeVisible();
     await expect(client.getByText(/Ask your partner to download PDF payslips/)).toBeVisible();
+  });
+
+  test("6a. client flags a document missing; caseworker responds; reminder is suppressed", async ({ playwright }) => {
+    // Navigate to the council tax bill doc (added in test 4) via the accommodation group
+    await client.goto("/");
+    await expect(client.getByRole("heading", { name: /Hello/ })).toBeVisible();
+    await client.getByRole("button", { name: /^Accommodation/ }).click();
+    await client.getByRole("button", { name: /^Council tax bill/ }).click();
+    // The "I can't find this" button should be present
+    await expect(client.getByRole("button", { name: "I can't find this document" })).toBeVisible();
+    await client.getByRole("button", { name: "I can't find this document" }).click();
+    await expect(client.getByLabel("Tell us why, in a few words")).toBeVisible();
+    await client.getByLabel("Tell us why, in a few words").fill("We moved house and I cannot find the bill.");
+    await client.getByRole("button", { name: "Tell my caseworker" }).click();
+    // Toast confirms
+    await expect(client.getByText("Saved. Your caseworker has been told.")).toBeVisible();
+    // Banner appears on the doc screen
+    await expect(client.getByText("We have told your caseworker.")).toBeVisible();
+    // "I can't find this" button is now hidden
+    await expect(client.getByRole("button", { name: "I can't find this document" })).toHaveCount(0);
+
+    // Caseworker gets an email (note is in the portal, not in the email body)
+    await mailTo("info@uhalegal.com", /cannot find: Council tax bill/);
+
+    // Missing tab shows the reason
+    await staff.goto(`/staff#c/${clientCaseId}/missing`);
+    await staff.reload();
+    await expect(staff.getByText(/We moved house/)).toBeVisible();
+
+    // Caseworker opens the doc and responds
+    await staff.getByRole("button", { name: /^Council tax bill/ }).click();
+    await expect(staff.getByText("Client said they cannot find this document")).toBeVisible();
+    await expect(staff.getByText("We moved house and I cannot find the bill.")).toBeVisible();
+    await staff.getByRole("button", { name: "Respond to client" }).click();
+    await staff.getByPlaceholder("Optional: write a note to the client").fill("You can use a bank statement showing your address instead.");
+    await staff.getByRole("button", { name: "Reply and clear flag" }).click();
+    await expect(staff.getByText("Reply sent to client")).toBeVisible();
+
+    // Client gets a notification email (reply text is in the portal, not in the email body)
+    await mailTo(clientEmail, /your caseworker left a note about Council tax bill/);
+
+    // On the client side, the banner is gone and the caseworker's reply is shown
+    await client.goto("/");
+    await client.getByRole("button", { name: /^Accommodation/ }).click();
+    await client.getByRole("button", { name: /^Council tax bill/ }).click();
+    await expect(client.getByText("We have told your caseworker.")).toHaveCount(0);
+    await expect(client.getByText("Your caseworker replied:")).toBeVisible();
+    await expect(client.getByText(/bank statement showing your address/)).toBeVisible();
+    // "I can't find this" button is hidden while a response is displayed
+    await expect(client.getByRole("button", { name: "I can't find this document" })).toHaveCount(0);
+
+    // The caseworker's API uses the right credentials; a different client cannot respond
+    const amina = await playwright.request.newContext({ baseURL: E2E.APP_URL, extraHTTPHeaders: { Origin: E2E.APP_URL } });
+    expect((await amina.post(`/api/staff/documents/nonexistent/missing`, { data: { note: "" } })).status()).toBe(401);
+    await amina.dispose();
+  });
+
+  test("6b. upload confirmation message uses firm reviewDays setting", async () => {
+    // Confirm the message includes "working days" after upload (default 2)
+    await client.goto("/");
+    await client.getByRole("button", { name: /^Accommodation/ }).click();
+    await client.getByRole("button", { name: /^Council tax bill/ }).click();
+    await client.locator("#up").setInputFiles(fixture("passport.png"));
+    await expect(client.getByText(/Your caseworker usually checks documents within 2 working days/)).toBeVisible();
   });
 
   test("6. close and reopen a case; admin deletes a client (documents kept)", async ({ playwright }) => {

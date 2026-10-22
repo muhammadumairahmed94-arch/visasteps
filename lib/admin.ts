@@ -20,7 +20,7 @@ export async function adminView(admin: User) {
   ]);
   return {
     me: admin.id,
-    firm: { name: firm.name, phone: firm.phone, whatsapp: firm.whatsapp ?? "" },
+    firm: { name: firm.name, phone: firm.phone, whatsapp: firm.whatsapp ?? "", reviewDays: firm.reviewDays },
     storage: {
       provider: process.env.STORAGE_PROVIDER ?? "fake",
       account: conn?.account ?? null,
@@ -55,6 +55,7 @@ const FirmInput = z.object({
   name: z.string().trim().min(2, "Enter the firm name").max(120),
   phone: z.string().trim().min(5, "Enter a phone number").max(40),
   whatsapp: z.string().trim().max(20).regex(/^\d*$/, "WhatsApp: digits only, with country code, e.g. 923341161664"),
+  reviewDays: z.coerce.number().int().min(1, "Enter at least 1 day").max(30, "Enter 30 days or fewer").default(2),
 });
 
 export async function updateFirm(admin: User, input: unknown) {
