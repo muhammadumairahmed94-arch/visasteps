@@ -283,15 +283,7 @@ function CaseView({
       />
     );
   } else if (view.tab === "review") body = review.length ? rows(review) : <p className="muted">Nothing to review right now.</p>;
-  else if (view.tab === "missing")
-    body = missingDocs.length ? (
-      <>
-        {rows(missingDocs)}
-        <p className="muted">Automatic reminders start in Phase 4.</p>
-      </>
-    ) : (
-      <p className="muted">Nothing missing.</p>
-    );
+  else if (view.tab === "missing") body = missingDocs.length ? rows(missingDocs) : <p className="muted">Nothing missing.</p>;
   else if (view.tab === "folders") {
     const g = view.group ? data.groups.find((x) => x.id === view.group) : undefined;
     body = g ? (
@@ -340,6 +332,7 @@ function CaseView({
             "Folders are created when the client sets up their account."
           )}
         </p>
+        <SubmissionDate clientId={view.id} value={data.client.plannedSubmissionDate} toast={toast} onChange={() => void load()} />
         {!data.client.closedAt && (
           <>
             <button
@@ -658,3 +651,34 @@ function CaseActions({ clientId, caseRef, closed, admin, toast, onChange, onDele
 }
 
 const confirmClose = (ref: string) => window.confirm(`Close ${ref}? The client will be signed out and can no longer sign in. You can reopen it later.`);
+
+/** Planned submission date — used to turn date windows into exact dates on the client portal. */
+function SubmissionDate({ clientId, value, toast, onChange }: { clientId: string; value: string | null; toast: (m: string) => void; onChange: () => void }) {
+  const [busy, setBusy] = useState(false);
+  async function save(date: string | null) {
+    setBusy(true);
+    const r = await api<{ message: string }>(`/api/staff/cases/${clientId}`, { method: "PATCH", json: { plannedSubmissionDate: date || null } });
+    setBusy(false);
+    if (!r.ok) return toast(r.error);
+    toast(date ? "Planned submission date saved" : "Planned submission date cleared");
+    onChange();
+  }
+  return (
+    <section className="detail" aria-labelledby="subdate-h">
+      <h2 id="subdate-h">Planned submission date</h2>
+      <p className="muted">Used to turn date windows (&ldquo;last 6 months&rdquo;) into exact dates on the client portal. If not set, today&apos;s date is used instead.</p>
+      <div className="field">
+        <label htmlFor={`sd-${clientId}`} className="sr-only">Planned submission date</label>
+        <input
+          id={`sd-${clientId}`}
+          type="date"
+          className="input"
+          defaultValue={value ?? ""}
+          aria-label="Planned submission date"
+          disabled={busy}
+          onBlur={(e) => { if (e.target.value !== (value ?? "")) save(e.target.value || null); }}
+        />
+      </div>
+    </section>
+  );
+}

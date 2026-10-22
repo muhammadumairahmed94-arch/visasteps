@@ -30,7 +30,7 @@ export async function syncRoutes(firmId: string, apply: boolean) {
       const hasFiles = cur.documents.some((x) => x._count.files > 0);
       const folder = cur.folder !== d.folder && hasFiles ? cur.folder : d.folder; // never move a section clients have already filled
       if (folder !== d.folder) say(`kept "${d.title}" in ${cur.folder} (files already saved there)`);
-      const data = { title: d.title, why: d.why, required: d.required, groupLabel: d.groupLabel, folder, order, archivedAt: null };
+      const data = { title: d.title, why: d.why, howToGet: d.howToGet ?? null, exampleImage: d.exampleImage ?? null, dateWindow: d.dateWindow ?? null, required: d.required, groupLabel: d.groupLabel, folder, order, archivedAt: null };
       const changed = (Object.keys(data) as (keyof typeof data)[]).filter((k) => cur[k] !== data[k]);
       if (!changed.length) continue;
       say(`update "${d.title}" (${changed.join(", ")})`);

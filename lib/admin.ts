@@ -42,7 +42,7 @@ export async function adminView(admin: User) {
       name: r.name,
       clients: r._count.clients,
       folders: [...new Set(r.items.map((i) => i.folder))].sort(),
-      items: r.items.map((i) => ({ id: i.id, folder: i.folder, groupLabel: i.groupLabel, title: i.title, why: i.why, typeKey: i.typeKey, required: i.required })),
+      items: r.items.map((i) => ({ id: i.id, folder: i.folder, groupLabel: i.groupLabel, title: i.title, why: i.why, howToGet: i.howToGet ?? "", exampleImage: i.exampleImage ?? "", dateWindow: i.dateWindow ?? "", typeKey: i.typeKey, required: i.required })),
     })),
   };
 }
@@ -169,7 +169,7 @@ export async function addRoute(admin: User, input: unknown) {
       firmId: admin.firmId,
       name: v.data.name,
       extraFolders: source?.extraFolders ?? ["Translations", "Correspondence"].map((f, i) => `${String(90 + i)} ${f}`),
-      items: source ? { create: source.items.map(({ folder, groupLabel, title, why, typeKey, required, order }) => ({ folder, groupLabel, title, why, typeKey, required, order })) } : undefined,
+      items: source ? { create: source.items.map(({ folder, groupLabel, title, why, howToGet, exampleImage, dateWindow, typeKey, required, order }) => ({ folder, groupLabel, title, why, howToGet, exampleImage, dateWindow, typeKey, required, order })) } : undefined,
     },
   });
   await audit({ firmId: admin.firmId, actorType: "USER", actorId: admin.id, action: "admin.route.add", targetId: route.id });
@@ -178,7 +178,10 @@ export async function addRoute(admin: User, input: unknown) {
 
 const ItemInput = z.object({
   title: z.string().trim().min(2, "Enter the document name").max(100),
-  why: z.string().trim().min(5, "Add one plain sentence explaining the document").max(300),
+  why: z.string().trim().min(5, "Add one plain sentence explaining the document").max(500),
+  howToGet: z.string().trim().max(1000).optional(),
+  exampleImage: z.string().trim().max(120).optional(),
+  dateWindow: z.string().trim().max(40).optional(),
   required: z.boolean(),
   folder: z.string().trim().max(60).optional(), // existing folder, or empty to create one
   newFolder: z.string().trim().max(50).optional(), // name for a new folder / group
@@ -207,7 +210,7 @@ export async function addItem(admin: User, routeId: string, input: unknown) {
   let typeKey = typeKeyFrom(v.data.title);
   for (let k = 2; route.items.some((i) => i.typeKey === typeKey); k++) typeKey = `${typeKeyFrom(v.data.title)}-${k}`;
   const order = Math.max(-1, ...route.items.filter((i) => i.folder === folder).map((i) => i.order)) + 1;
-  const item = await db.checklistItem.create({ data: { routeId, folder, groupLabel, title: v.data.title, why: v.data.why, required: v.data.required, typeKey, order } });
+  const item = await db.checklistItem.create({ data: { routeId, folder, groupLabel, title: v.data.title, why: v.data.why, howToGet: v.data.howToGet || null, exampleImage: v.data.exampleImage || null, dateWindow: v.data.dateWindow || null, required: v.data.required, typeKey, order } });
 
   let added = 0;
   if (v.data.addToExisting !== false) {
@@ -221,7 +224,10 @@ export async function addItem(admin: User, routeId: string, input: unknown) {
 
 const ItemChange = z.object({
   title: z.string().trim().min(2).max(100).optional(),
-  why: z.string().trim().min(5).max(300).optional(),
+  why: z.string().trim().min(5).max(500).optional(),
+  howToGet: z.string().trim().max(1000).optional(),
+  exampleImage: z.string().trim().max(120).optional(),
+  dateWindow: z.string().trim().max(40).optional(),
   required: z.boolean().optional(),
   move: z.enum(["up", "down"]).optional(),
   remove: z.boolean().optional(),
@@ -246,7 +252,17 @@ export async function changeItem(admin: User, itemId: string, input: unknown) {
       await db.$transaction(reordered.map((s, k) => db.checklistItem.update({ where: { id: s.id }, data: { order: k } })));
     }
   } else {
-    await db.checklistItem.update({ where: { id: item.id }, data: { title: v.data.title, why: v.data.why, required: v.data.required } });
+    await db.checklistItem.update({
+      where: { id: item.id },
+      data: {
+        title: v.data.title,
+        why: v.data.why,
+        howToGet: v.data.howToGet !== undefined ? (v.data.howToGet || null) : undefined,
+        exampleImage: v.data.exampleImage !== undefined ? (v.data.exampleImage || null) : undefined,
+        dateWindow: v.data.dateWindow !== undefined ? (v.data.dateWindow || null) : undefined,
+        required: v.data.required,
+      },
+    });
   }
   await audit({ firmId: admin.firmId, actorType: "USER", actorId: admin.id, action: v.data.remove ? "admin.item.remove" : "admin.item.edit", targetId: item.id });
 }

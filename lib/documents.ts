@@ -14,6 +14,7 @@ import { MAX_BYTES, detectKind, toPdf } from "./files";
 import { scan, scanningEnabled } from "./virus";
 import { notifyOps } from "./alerts";
 import { caseFolder, storedFileName, ukDate } from "./naming";
+import { resolveDateWindow, ukToday } from "./date-window";
 
 export { UserError };
 
@@ -37,6 +38,7 @@ export async function clientPortalView(clientId: string) {
       documents: { include: { checklistItem: true, files: current } },
     },
   });
+  const anchor = c.plannedSubmissionDate ?? ukToday();
   const docs = c.documents.filter(shown).map((d) => ({ ...d.checklistItem, doc: d }));
   return {
     firstName: c.firstName,
@@ -50,6 +52,9 @@ export async function clientPortalView(clientId: string) {
         id: i.doc.id,
         title: i.title,
         why: i.why,
+        dates: i.dateWindow ? resolveDateWindow(i.dateWindow, anchor) : null,
+        exampleImage: i.exampleImage ?? null,
+        howToGet: i.howToGet ?? null,
         required: i.required,
         status: i.doc.status,
         note: i.doc.status === "REDO" ? i.doc.note : null,
@@ -62,7 +67,7 @@ export async function clientPortalView(clientId: string) {
 export type ClientPortalView = Awaited<ReturnType<typeof clientPortalView>>;
 
 /** Admins see every case in the firm; caseworkers see the cases assigned to them. */
-const visibleCases = (u: User) => (u.role === "ADMIN" ? { firmId: u.firmId } : { firmId: u.firmId, caseworkerId: u.id });
+export const visibleCases = (u: User) => (u.role === "ADMIN" ? { firmId: u.firmId } : { firmId: u.firmId, caseworkerId: u.id });
 
 export async function staffCaseList(u: User) {
   const clients = await db.client.findMany({
@@ -100,6 +105,7 @@ export async function staffCaseView(u: User, clientId: string) {
       email: c.email,
       accountCreated: !!c.accountCreatedAt,
       closedAt: c.closedAt ? ukDate(c.closedAt) : null,
+      plannedSubmissionDate: c.plannedSubmissionDate ? c.plannedSubmissionDate.toISOString().slice(0, 10) : null,
       reminders: reminderSummary(c, c.documents.filter((d) => shown(d) && d.status === "NEED" && d.checklistItem.required).length),
       storageRoot: c.accountCreatedAt ? caseFolder(c).join(" / ") : null,
     },

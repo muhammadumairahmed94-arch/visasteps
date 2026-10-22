@@ -7,7 +7,7 @@ import { CLIENT_LABEL, Page, Row, Tabs, api, useHashView, useToast, type Status 
 
 type Tab = "docs" | "visa" | "me" | "help";
 type View = { tab: Tab; group?: string; doc?: string; sub?: string };
-type Doc = ClientPortalView["groups"][number]["docs"][number] & { status: Status };
+type Doc = ClientPortalView["groups"][number]["docs"][number] & { status: Status; dates: string | null; exampleImage: string | null; howToGet: string | null };
 
 const MAX_BYTES = 20 * 1024 * 1024;
 const sent = (s: Status) => s === "SENT" || s === "OK";
@@ -125,7 +125,7 @@ export default function ClientPortal({ token: linkToken }: { token?: string }) {
     body = (
       <div className="detail">
         <h2 data-focus tabIndex={-1}>{data.route}</h2>
-        <p className="why">Visa route confirmed by the caseworker. No action needed.</p>
+        <p className="why">Your visa route has been confirmed by your caseworker. You do not need to do anything here.</p>
       </div>
     );
   else if (view.tab === "me" && view.sub === "details")
@@ -215,7 +215,12 @@ export default function ClientPortal({ token: linkToken }: { token?: string }) {
   );
 }
 
-function DocDetail({ doc, backLabel, onBack, onSent }: { doc: Doc; backLabel: string; onBack: () => void; onSent: (msg: string) => void }) {
+function DocDetail({ doc, backLabel, onBack, onSent }: {
+  doc: Doc;
+  backLabel: string;
+  onBack: () => void;
+  onSent: (msg: string) => void;
+}) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -240,6 +245,20 @@ function DocDetail({ doc, backLabel, onBack, onSent }: { doc: Doc; backLabel: st
       <div className="detail">
         <h2 data-focus tabIndex={-1}>{doc.title}</h2>
         <p className="why">{doc.why}</p>
+        {doc.dates && <p className="date-hint">Dates needed: <b>{doc.dates}</b></p>}
+        {doc.exampleImage && (
+          <figure className="sample-fig">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={`/samples/${doc.exampleImage}`} alt={`Example of ${doc.title}`} className="sample-img" />
+            <figcaption className="muted">Example</figcaption>
+          </figure>
+        )}
+        {doc.howToGet && (
+          <div className="how-to">
+            <b>How to get this</b>
+            <p>{doc.howToGet}</p>
+          </div>
+        )}
         {doc.status === "REDO" && doc.note && (
           <div className="note">
             <b>Caseworker note:</b> {doc.note}
@@ -262,7 +281,7 @@ function DocDetail({ doc, backLabel, onBack, onSent }: { doc: Doc; backLabel: st
               <input type="file" id="up" accept="image/*,.pdf,.heic,.heif" multiple disabled={busy} onChange={onFiles} />
             </label>
             {busy && <p className="sr-only" role="status">Uploading</p>}
-            <p className="muted">Unsure if it is right? Upload it and our team will check it.</p>
+            <p className="muted">Not sure if it&apos;s right? Upload it anyway and our team will check it.</p>
           </>
         )}
       </div>

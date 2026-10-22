@@ -80,6 +80,7 @@ model Client {
   route            Route            @relation(fields: [routeId], references: [id])
   caseworkerId     String
   caseworker       User             @relation(fields: [caseworkerId], references: [id])
+  plannedSubmissionDate DateTime? // set by the caseworker; used to turn date windows into exact dates
   remindersPaused  Boolean          @default(false)
   reminderCount    Int              @default(0) // "missing documents" reminders sent (max 5)
   lastReminderAt   DateTime?
@@ -108,18 +109,21 @@ model Route {
 }
 
 model ChecklistItem {
-  id         String           @id @default(cuid())
-  routeId    String
-  route      Route            @relation(fields: [routeId], references: [id])
-  folder     String // e.g. "01 Identity" — also decides group order
-  groupLabel String // client-facing, e.g. "Identity"
-  title      String
-  why        String
-  typeKey    String // used in file names, e.g. "Passport"
-  required   Boolean          @default(true)
-  order      Int
-  archivedAt DateTime? // removed from the route; kept for clients who already sent it
-  documents  ClientDocument[]
+  id           String           @id @default(cuid())
+  routeId      String
+  route        Route            @relation(fields: [routeId], references: [id])
+  folder       String // e.g. "01 Identity" — also decides group order
+  groupLabel   String // client-facing, e.g. "Identity"
+  title        String
+  why          String
+  howToGet     String? // plain-English steps for the client, e.g. how to download statements
+  exampleImage String? // filename in public/samples/, e.g. "bank-statement.png"
+  dateWindow   String? // e.g. "last 6 months" or "last 28 days" — resolved to exact dates
+  typeKey      String // used in file names, e.g. "Passport"
+  required     Boolean          @default(true)
+  order        Int
+  archivedAt   DateTime? // removed from the route; kept for clients who already sent it
+  documents    ClientDocument[]
 }
 
 model ClientDocument {

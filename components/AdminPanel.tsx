@@ -275,7 +275,7 @@ function ItemRow({ item, first, last, run }: { item: Item; first: boolean; last:
         onSubmit={async (e) => {
           e.preventDefault();
           const f = form(e);
-          if (await act({ title: f.title, why: f.why, required: f.required === "on" })) setEditing(false);
+          if (await act({ title: f.title, why: f.why, howToGet: f.howToGet, exampleImage: f.exampleImage, dateWindow: f.dateWindow, required: f.required === "on" })) setEditing(false);
         }}
       >
         <div className="field">
@@ -283,8 +283,22 @@ function ItemRow({ item, first, last, run }: { item: Item; first: boolean; last:
           <input id={`t-${item.id}`} name="title" className="input" defaultValue={item.title} required />
         </div>
         <div className="field">
-          <label htmlFor={`w-${item.id}`}>One sentence for the client</label>
+          <label htmlFor={`w-${item.id}`}>What it is (one sentence for the client)</label>
           <textarea id={`w-${item.id}`} name="why" rows={2} defaultValue={item.why} required />
+        </div>
+        <div className="field">
+          <label htmlFor={`dw-${item.id}`}>Date window</label>
+          <input id={`dw-${item.id}`} name="dateWindow" className="input" defaultValue={item.dateWindow} placeholder='e.g. "last 6 months" or "last 28 days"' />
+          <p className="hint">Leave empty if no date rule applies. Exact dates are shown to the client using the planned submission date.</p>
+        </div>
+        <div className="field">
+          <label htmlFor={`ei-${item.id}`}>Example image filename</label>
+          <input id={`ei-${item.id}`} name="exampleImage" className="input" defaultValue={item.exampleImage} placeholder="e.g. bank-statement.png" />
+          <p className="hint">File must be in the public/samples/ folder on the server.</p>
+        </div>
+        <div className="field">
+          <label htmlFor={`hg-${item.id}`}>How to get this (optional)</label>
+          <textarea id={`hg-${item.id}`} name="howToGet" rows={3} defaultValue={item.howToGet} placeholder="Plain-English steps, e.g. how to download statements from a banking app." />
         </div>
         <label className="check">
           <input type="checkbox" name="required" defaultChecked={item.required} /> Required (unticked = optional)
@@ -332,6 +346,9 @@ function AddItem({ route, run, onDone }: { route: Route; run: Run; onDone: () =>
         const ok = await run(`/api/admin/routes/${route.id}/items`, {
           title: f.title,
           why: f.why,
+          howToGet: f.howToGet || undefined,
+          exampleImage: f.exampleImage || undefined,
+          dateWindow: f.dateWindow || undefined,
           required: f.required === "on",
           folder: folder === "__new" ? "" : folder,
           newFolder: f.newFolder,
@@ -347,8 +364,22 @@ function AddItem({ route, run, onDone }: { route: Route; run: Run; onDone: () =>
         <input id="n-title" name="title" className="input" placeholder="e.g. Council tax bill" required />
       </div>
       <div className="field">
-        <label htmlFor="n-why">One sentence for the client</label>
+        <label htmlFor="n-why">What it is (one sentence for the client)</label>
         <textarea id="n-why" name="why" rows={2} placeholder="e.g. A recent bill showing the UK address." required />
+      </div>
+      <div className="field">
+        <label htmlFor="n-dw">Date window</label>
+        <input id="n-dw" name="dateWindow" className="input" placeholder='e.g. "last 6 months" or "last 28 days"' />
+        <p className="hint">Leave empty if no date rule applies.</p>
+      </div>
+      <div className="field">
+        <label htmlFor="n-ei">Example image filename</label>
+        <input id="n-ei" name="exampleImage" className="input" placeholder="e.g. bank-statement.png" />
+        <p className="hint">File must be in the public/samples/ folder on the server.</p>
+      </div>
+      <div className="field">
+        <label htmlFor="n-hg">How to get this (optional)</label>
+        <textarea id="n-hg" name="howToGet" rows={3} placeholder="Plain-English steps, e.g. how to download statements from a banking app." />
       </div>
       <div className="field">
         <label htmlFor="n-folder">Section (and OneDrive folder)</label>

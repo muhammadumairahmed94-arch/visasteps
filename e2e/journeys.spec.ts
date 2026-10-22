@@ -192,7 +192,7 @@ test.describe.serial("main journeys", () => {
     await staff.locator("#route").selectOption((await spouseRoute.getAttribute("value"))!);
     await staff.getByRole("button", { name: "Add a document to Spouse visa" }).click();
     await staff.getByLabel("Document name").fill("Council tax bill");
-    await staff.getByLabel("One sentence for the client").fill("A recent bill showing the UK address.");
+    await staff.getByLabel("What it is (one sentence for the client)").fill("A recent bill showing the UK address.");
     await staff.getByLabel("Section (and OneDrive folder)").selectOption({ label: "Accommodation — 04 Accommodation" });
     await staff.getByRole("button", { name: "Add", exact: true }).click();
     await expect(staff.getByText(/Document added, and to \d+ existing client/)).toBeVisible();
@@ -225,6 +225,44 @@ test.describe.serial("main journeys", () => {
     await expect(c.getByText(/expired or has already been used/)).toBeVisible();
     await c.goto(copied);
     await expect(c.getByRole("heading", { name: "Create account" })).toBeVisible();
+  });
+
+  test("5b. document guidance: dates, how-to, and planned submission date", async () => {
+    // Admin edits the payslips checklist item to add a dateWindow and howToGet
+    await staff.goto("/staff#admin/checklists");
+    await staff.reload();
+    const spouseRoute = staff.locator("#route option", { hasText: /^Spouse visa \(/ });
+    await staff.locator("#route").selectOption((await spouseRoute.getAttribute("value"))!);
+    // Find the Payslips row and click Edit
+    const payslipRow = staff.locator(".item-row", { hasText: /Sponsor's payslips/ });
+    await payslipRow.getByRole("button", { name: "Edit" }).click();
+    await staff.getByLabel("Date window").fill("last 6 months");
+    await staff.getByLabel("How to get this (optional)").fill("Ask your partner to download PDF payslips from their payroll system.");
+    await staff.getByRole("button", { name: "Save" }).click();
+    await expect(staff.getByText(/Saved/)).toBeVisible();
+
+    // Caseworker sets a planned submission date on Amina's case
+    await staff.goto("/staff");
+    await staff.reload();
+    await staff.getByRole("button", { name: /^Amina Khan/ }).click();
+    await staff.getByRole("tab", { name: "Client" }).click();
+    await expect(staff.getByRole("heading", { name: "Planned submission date" })).toBeVisible();
+    // Set to a fixed date so we can assert the resolved range on the client side
+    const dateInput = staff.getByRole("textbox", { name: "Planned submission date" });
+    await dateInput.fill("2026-10-01");
+    await dateInput.blur();
+    await expect(staff.getByText("Planned submission date saved")).toBeVisible();
+
+    // Client sees the resolved date range and how-to text on the payslips document
+    await client.goto("/");
+    await client.getByRole("button", { name: /^Finances/ }).click();
+    await client.getByRole("button", { name: /^Sponsor's payslips/ }).click();
+    // Dates resolved: last 6 months before Oct 1 2026 = April–September 2026
+    await expect(client.getByText(/Dates needed/)).toBeVisible();
+    await expect(client.getByText(/1 April to 30 September 2026/)).toBeVisible();
+    // How-to text is shown
+    await expect(client.getByText("How to get this")).toBeVisible();
+    await expect(client.getByText(/Ask your partner to download PDF payslips/)).toBeVisible();
   });
 
   test("6. close and reopen a case; admin deletes a client (documents kept)", async ({ playwright }) => {
