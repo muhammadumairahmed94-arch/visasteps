@@ -42,7 +42,7 @@ export const PATCH = handler(async (req, ctx: { params: Promise<{ id: string }> 
     await audit({ firmId: me.firmId, actorType: "USER", actorId: me.id, action: "staff.case.submissionDate", targetId: clientId });
   }
   if (v.data.caseStage !== undefined) {
-    await audit({ firmId: me.firmId, actorType: "USER", actorId: me.id, action: "staff.case.stageChange", targetId: clientId });
+    await audit({ firmId: me.firmId, actorType: "USER", actorId: me.id, action: `staff.case.stageChange.${v.data.caseStage}`, targetId: clientId });
   }
   return json({ message: "Saved" });
 });

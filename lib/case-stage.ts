@@ -4,8 +4,8 @@ export const STAGES: { key: CaseStageKey; label: string; detail: string }[] = [
   { key: "DOCUMENTS", label: "Sending documents", detail: "You are sending us your documents." },
   { key: "CHECKING",  label: "Lawyer checking",   detail: "Your lawyer is reviewing your documents." },
   { key: "READY",     label: "Ready to submit",   detail: "Your application is ready. Your lawyer will send it to the Home Office soon." },
-  { key: "SUBMITTED", label: "Submitted",          detail: "Your application has been sent to the Home Office." },
-  { key: "DECISION",  label: "Decision",           detail: "The Home Office is making a decision. We will let you know as soon as we hear." },
+  { key: "SUBMITTED", label: "Submitted",          detail: "Your application has been sent to the Home Office. They are now making a decision. This can take several weeks." },
+  { key: "DECISION",  label: "Decision",           detail: "The Home Office has made a decision. Your caseworker will contact you about it." },
 ];
 
 /** Returns the first REDO doc, then the first required NEED doc, or null when nothing is left to do. */

@@ -1,11 +1,12 @@
 import type { User } from "@prisma/client";
 import { db } from "./db";
 
-const TEXT: Record<string, string> = {
+export const TEXT: Record<string, string> = {
+  // Client lifecycle
   "client.create": "Case created and invite sent",
   "client.invite": "Invite sent again",
-  "client.reset.send": "Password reset link sent",
   "client.invite.link": "Invite link made to send by WhatsApp/text",
+  "client.reset.send": "Password reset link sent",
   "client.reset.link": "Password reset link made to send by WhatsApp/text",
   "client.account.create": "Client created their account",
   "client.reset.request": "Client asked for a password reset",
@@ -14,20 +15,53 @@ const TEXT: Record<string, string> = {
   "client.signin.failed": "Wrong password entered",
   "client.signout": "Client signed out",
   "client.portal.view": "Client viewed the portal",
+  "client.close": "Case closed",
+  "client.reopen": "Case reopened",
+  "client.delete": "Case permanently deleted",
+  "client.reminder": "Reminder email sent: documents still needed",
+  "client.reminder.redo": "Reminder email sent: please re-upload",
+  "client.reminder.failed": "Reminder email could not be sent",
+  // Staff auth
+  "staff.signin": "Staff signed in",
+  "staff.signin.failed": "Staff: wrong password entered",
+  "staff.signout": "Staff signed out",
+  "staff.password.set": "Staff set their password",
+  "staff.2fa.failed": "Two-step sign-in: wrong code entered",
+  "staff.2fa.enrol": "Two-step sign-in set up",
+  "staff.2fa.recovery": "Two-step sign-in: recovery code used",
+  // Staff case
+  "staff.case.view": "Viewed the case",
+  "staff.case.submissionDate": "Planned submission date set",
+  "staff.case.stageChange.DOCUMENTS": "Changed case stage to Sending documents",
+  "staff.case.stageChange.CHECKING": "Changed case stage to Lawyer checking",
+  "staff.case.stageChange.READY": "Changed case stage to Ready to submit",
+  "staff.case.stageChange.SUBMITTED": "Changed case stage to Submitted",
+  "staff.case.stageChange.DECISION": "Changed case stage to Decision",
+  // Documents
   "document.upload": "Uploaded",
   "document.approve": "Approved",
   "document.redo": "Asked to re-upload",
   "document.view": "Opened file",
   "document.virus": "Upload refused: virus scanner flagged the file",
-  "staff.case.view": "Viewed the case",
-  "client.close": "Case closed",
-  "client.reopen": "Case reopened",
+  "document.missing": "Client said they cannot find this document",
+  "document.missing.respond": "Caseworker replied about missing document",
+  // Storage
   "storage.retry": "Retried saving to OneDrive",
-  "client.reminder": "Reminder email sent: documents still needed",
-  "client.reminder.redo": "Reminder email sent: please re-upload",
-  "client.reminder.failed": "Reminder email could not be sent",
+  // Reminders
   "reminders.pause": "Reminders paused",
   "reminders.resume": "Reminders resumed",
+  // Admin
+  "admin.firm.update": "Firm settings saved",
+  "admin.user.add": "Team member added",
+  "admin.user.disable": "Team member removed",
+  "admin.user.enable": "Team member restored",
+  "admin.user.reset2fa": "Two-step sign-in reset",
+  "admin.user.sendLink": "Password link sent",
+  "admin.user.role": "Role changed",
+  "admin.route.add": "Visa route added",
+  "admin.item.add": "Checklist item added",
+  "admin.item.edit": "Checklist item edited",
+  "admin.item.remove": "Checklist item removed",
 };
 
 /** Recent audit entries for one client, in plain words, newest first. Scoped to the caller's firm. */
