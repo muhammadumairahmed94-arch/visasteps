@@ -101,6 +101,7 @@ model Client {
   documents        ClientDocument[]
   invites          Invite[]
   sessions         Session[]
+  signInCodes      SignInCode[]
 
   @@unique([firmId, caseRef])
 }
@@ -234,6 +235,24 @@ model RateLimit {
   key     String   @id
   count   Int
   resetAt DateTime
+}
+
+/**
+ * Single-use 6-digit codes for client OTP sign-in.
+ * Stored hashed (HMAC-SHA256 keyed to AUTH_SECRET). Expires after 10 minutes.
+ * A new code replaces any earlier unused one. Max 5 wrong attempts before the code is cancelled.
+ */
+model SignInCode {
+  id        String    @id @default(cuid())
+  clientId  String
+  client    Client    @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  codeHash  String
+  expiresAt DateTime
+  usedAt    DateTime?
+  attempts  Int       @default(0)
+  createdAt DateTime  @default(now())
+
+  @@index([clientId])
 }
 
 enum StorageStatus {

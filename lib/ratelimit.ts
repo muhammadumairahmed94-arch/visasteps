@@ -14,6 +14,9 @@ export const LIMITS = {
   upload: { max: 60, window: 60 * MIN },        // per client
   reportMissing: { max: 10, window: 60 * MIN }, // per client
   createClient: { max: 50, window: 60 * MIN },  // per caseworker
+  otpRequest:      { max: 5,  window: 60 * MIN },   // per IP: requesting an OTP code
+  otpRequestEmail: { max: 3,  window: 60 * MIN },   // per email: prevents inbox flooding
+  otpVerify:       { max: 10, window: 15 * MIN },   // per IP: verifying a code
 } as const;
 
 export type LimitName = keyof typeof LIMITS;

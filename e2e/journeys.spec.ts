@@ -370,6 +370,34 @@ test.describe.serial("main journeys", () => {
     await expect(client.getByText("Personal details")).toBeVisible();
   });
 
+  test("8. OTP sign-in: email a code, enter it, land on the portal", async () => {
+    // Sign the client out via the UI (Help tab → Sign out)
+    await client.goto("/");
+    await client.getByRole("tab", { name: "Help" }).click();
+    await client.getByRole("button", { name: "Sign out" }).click();
+    await expect(client.getByRole("heading", { name: "Client sign in" })).toBeVisible();
+
+    // Choose OTP sign-in
+    await client.getByRole("button", { name: /Email me a sign-in code/i }).click();
+    await expect(client.getByRole("heading", { name: "Email me a sign-in code" })).toBeVisible();
+    await client.getByLabel("Email").fill(clientEmail);
+    await client.getByRole("button", { name: "Send code" }).click();
+
+    // Server always returns the same message; enter-code step appears
+    await expect(client.getByRole("heading", { name: "Enter your code" })).toBeVisible();
+    await expect(client.getByText(clientEmail)).toBeVisible();
+
+    // Read the code from the file-email directory
+    const mail = await mailTo(clientEmail, /sign-in code/);
+    const codeMatch = /\b(\d{6})\b/.exec(mail.text);
+    expect(codeMatch).not.toBeNull();
+    const code = codeMatch![1];
+
+    await client.getByLabel("6-digit code").fill(code);
+    await client.getByRole("button", { name: "Sign in" }).click();
+    await expect(client.getByRole("heading", { name: /Hello/ })).toBeVisible();
+  });
+
   test("6. close and reopen a case; admin deletes a client (documents kept)", async ({ playwright }) => {
     staff.on("dialog", (d) => d.accept());
 

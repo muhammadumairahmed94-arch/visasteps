@@ -7,6 +7,8 @@ type Link = { kind: "SETUP" | "RESET"; email: string; firm: string };
 type Step =
   | { kind: "checking" }
   | { kind: "signin"; notice?: string }
+  | { kind: "otpRequest" }
+  | { kind: "otpCode"; email: string }
   | { kind: "forgot" }
   | { kind: "forgotSent"; email: string }
   | { kind: "setup"; link: Link }
@@ -107,6 +109,72 @@ export default function ClientSignIn({ token, onDone }: { token?: string; onDone
       </>
     );
 
+  if (step.kind === "otpRequest")
+    return (
+      <>
+        <section className="hello">
+          <h1 data-focus tabIndex={-1}>Email me a sign-in code</h1>
+          <p>We will send a 6-digit code to your email address. It is valid for 10 minutes.</p>
+        </section>
+        <form
+          className="detail"
+          noValidate
+          onSubmit={(e) => {
+            e.preventDefault();
+            const { email } = values(e);
+            submit("/api/auth/client/otp/request", { email }, () => go({ kind: "otpCode", email }));
+          }}
+        >
+          <div className="field">
+            <label htmlFor="email">Email</label>
+            <input id="email" name="email" className="input" type="email" autoComplete="email" required />
+          </div>
+          {err}
+          <button className="big" disabled={busy}>{busy ? "Sending…" : "Send code"}</button>
+          <button type="button" className="link" onClick={() => go({ kind: "signin" })}>Back to sign in</button>
+        </form>
+      </>
+    );
+
+  if (step.kind === "otpCode")
+    return (
+      <>
+        <section className="hello">
+          <h1 data-focus tabIndex={-1}>Enter your code</h1>
+          <p>A 6-digit code has been sent to <b>{step.email}</b>. Check your inbox (and spam folder).</p>
+        </section>
+        <form
+          className="detail"
+          noValidate
+          onSubmit={(e) => {
+            e.preventDefault();
+            submit("/api/auth/client/otp/verify", { email: step.email, ...values(e) }, onDone);
+          }}
+        >
+          <div className="field">
+            <label htmlFor="otp-code">6-digit code</label>
+            <input
+              id="otp-code"
+              name="code"
+              className="input"
+              type="text"
+              inputMode="numeric"
+              autoComplete="one-time-code"
+              pattern="\d{6}"
+              maxLength={6}
+              placeholder="000000"
+              autoFocus
+              required
+            />
+          </div>
+          <RememberMe />
+          {err}
+          <button className="big" disabled={busy}>{busy ? "Signing in…" : "Sign in"}</button>
+          <button type="button" className="link" onClick={() => go({ kind: "otpRequest" })}>Send a new code</button>
+        </form>
+      </>
+    );
+
   if (step.kind === "forgot")
     return (
       <>
@@ -163,12 +231,26 @@ export default function ClientSignIn({ token, onDone }: { token?: string; onDone
           <input id="email" name="email" className="input" type="email" autoComplete="username" required />
         </div>
         <Password label="Password" autoComplete="current-password" />
+        <RememberMe />
         {err}
         <button className="big" disabled={busy}>{busy ? "Signing in…" : "Sign in"}</button>
         <button type="button" className="link" onClick={() => go({ kind: "forgot" })}>Forgot password?</button>
+        <button type="button" className="link" onClick={() => go({ kind: "otpRequest" })}>Email me a sign-in code instead</button>
         <p className="muted">New client? Use the invitation link sent by email to create an account.</p>
       </form>
     </>
+  );
+}
+
+/** "Keep me signed in" checkbox — shown on all sign-in forms. */
+function RememberMe() {
+  return (
+    <div className="field">
+      <label className="check-label">
+        <input type="checkbox" name="remember" defaultChecked />
+        Keep me signed in on this phone
+      </label>
+    </div>
   );
 }
 

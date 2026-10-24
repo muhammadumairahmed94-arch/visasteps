@@ -1,7 +1,7 @@
 import bcrypt from "bcryptjs";
 import type { Client, Firm, LinkKind } from "@prisma/client";
 import { db } from "./db";
-import { randomToken, sha256 } from "./crypto";
+import { hmac, randomToken, safeEqual, sha256, sixDigitCode } from "./crypto";
 import { sendSafely } from "./adapters/email";
 
 const HOUR = 60 * 60 * 1000;
@@ -87,6 +87,114 @@ export async function sendResetLink(client: Client, firm: Firm): Promise<boolean
 }
 
 export type LoginResult = { ok: true; client: Client } | { ok: false; message: string; client?: Client };
+
+// ---------------------------------------------------------------------------
+// OTP sign-in
+// ---------------------------------------------------------------------------
+
+const OTP_TTL = 10 * 60 * 1000; // 10 minutes
+const OTP_MAX_ATTEMPTS = 5;
+
+export type OtpCodeRecord = {
+  id: string;
+  codeHash: string;
+  expiresAt: Date;
+  usedAt: Date | null;
+  attempts: number;
+};
+
+/**
+ * Pure function — no DB access. Returns { ok: true } or a failure descriptor.
+ * `cancel` is true when this wrong attempt is the last allowed before the code is retired.
+ * `countFail` is true when this attempt should increment the shared failedLogins counter.
+ */
+export function validateOtpCode(
+  rec: OtpCodeRecord,
+  inputCode: string,
+): { ok: true } | { ok: false; message: string; cancel: boolean; countFail: boolean } {
+  if (rec.usedAt)
+    return { ok: false, message: "That code has already been used. Please request a new one.", cancel: false, countFail: false };
+  if (rec.expiresAt < new Date())
+    return { ok: false, message: "That code has expired. Please request a new one.", cancel: false, countFail: false };
+  if (rec.attempts >= OTP_MAX_ATTEMPTS)
+    return { ok: false, message: "Too many wrong tries. Please request a new code.", cancel: false, countFail: false };
+  if (!safeEqual(hmac(inputCode), rec.codeHash)) {
+    const cancel = rec.attempts + 1 >= OTP_MAX_ATTEMPTS;
+    return {
+      ok: false,
+      message: cancel ? "Too many wrong tries. Please request a new code." : "That code is wrong.",
+      cancel,
+      countFail: true,
+    };
+  }
+  return { ok: true };
+}
+
+/** Creates a new code for the client, cancelling any previous unused one. Returns the plaintext code (never stored). */
+async function createSignInCode(clientId: string): Promise<string> {
+  const code = sixDigitCode();
+  await db.signInCode.updateMany({ where: { clientId, usedAt: null }, data: { usedAt: new Date() } });
+  await db.signInCode.create({ data: { clientId, codeHash: hmac(code), expiresAt: new Date(Date.now() + OTP_TTL) } });
+  return code;
+}
+
+export async function sendOtpCode(client: Client, firm: Firm): Promise<boolean> {
+  const code = await createSignInCode(client.id);
+  return sendSafely({
+    to: client.email,
+    brand: firm.name,
+    subject: `${firm.name}: your sign-in code`,
+    text: `Your sign-in code is: ${code}\n\nIt is valid for 10 minutes and can only be used once.\n\nIf you did not request this code, you can ignore this message.`,
+  });
+}
+
+/**
+ * Verifies an OTP code and returns the client on success.
+ * Wrong codes share the same failedLogins / lockedUntil counter as password sign-in.
+ */
+export async function redeemOtpCode(emailAddress: string, inputCode: string): Promise<LoginResult> {
+  const client = await db.client.findUnique({
+    where: { email: emailAddress.trim().toLowerCase() },
+    include: { firm: true },
+  });
+  const wrong = { ok: false as const, message: "That code is wrong or has expired. Please request a new one." };
+  if (!client) return wrong;
+  if (client.closedAt) return { ok: false, message: "This case is closed. Please contact us if you need access." };
+  if (client.lockedUntil && client.lockedUntil > new Date())
+    return { ok: false, message: `Too many attempts. Please wait 15 minutes, or use "Forgot password?".`, client };
+
+  const signInCode = await db.signInCode.findFirst({
+    where: { clientId: client.id, usedAt: null },
+    orderBy: { createdAt: "desc" },
+  });
+  if (!signInCode) return { ...wrong, client };
+
+  const result = validateOtpCode(signInCode, inputCode);
+
+  if (!result.ok) {
+    if (result.countFail) {
+      // Retire the code on the 5th wrong try; always increment its attempt counter
+      await db.signInCode.update({
+        where: { id: signInCode.id },
+        data: { attempts: { increment: 1 }, ...(result.cancel ? { usedAt: new Date() } : {}) },
+      });
+      // Shared lockout — same counter as wrong passwords
+      const fails = client.failedLogins + 1;
+      await db.client.update({
+        where: { id: client.id },
+        data: fails >= MAX_FAILS ? { failedLogins: 0, lockedUntil: new Date(Date.now() + LOCK) } : { failedLogins: fails },
+      });
+    }
+    return { ok: false, message: result.message, client };
+  }
+
+  // Success: retire the code and clear the shared lockout counter
+  await db.signInCode.update({ where: { id: signInCode.id }, data: { usedAt: new Date() } });
+  if (client.failedLogins) {
+    await db.client.update({ where: { id: client.id }, data: { failedLogins: 0, lockedUntil: null } });
+  }
+  return { ok: true, client };
+}
 
 export async function checkLogin(emailAddress: string, password: string): Promise<LoginResult> {
   const client = await db.client.findUnique({ where: { email: emailAddress.trim().toLowerCase() } });

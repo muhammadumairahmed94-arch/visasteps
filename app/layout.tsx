@@ -10,6 +10,11 @@ export const metadata: Metadata = {
   title: "UHA Legal · Client Portal",
   description: "Send your visa documents to your UHA Legal caseworker.",
   robots: { index: false, follow: false },
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "default",
+    title: "UHA Legal",
+  },
 };
 
 export const viewport: Viewport = { width: "device-width", initialScale: 1, viewportFit: "cover" };

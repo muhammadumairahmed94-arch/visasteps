@@ -21,6 +21,10 @@ export const TEXT: Record<string, string> = {
   "client.reminder": "Reminder email sent: documents still needed",
   "client.reminder.redo": "Reminder email sent: please re-upload",
   "client.reminder.failed": "Reminder email could not be sent",
+  // Client OTP
+  "client.otp.request": "Sign-in code sent by email",
+  "client.otp.verify": "Signed in with email code",
+  "client.otp.failed": "Wrong sign-in code entered",
   // Staff auth
   "staff.signin": "Staff signed in",
   "staff.signin.failed": "Staff: wrong password entered",
