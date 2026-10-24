@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState, type ChangeEvent } from "react";
 import type { ClientPortalView } from "@/lib/documents";
+import { STAGES, findNextDoc } from "@/lib/case-stage";
 import ClientSignIn from "./ClientSignIn";
 import { CLIENT_LABEL, Page, Row, Tabs, api, useHashView, useToast, type Status } from "./ui";
 
@@ -111,26 +112,29 @@ export default function ClientPortal({ token: linkToken }: { token?: string }) {
       );
     else
       body = (
-        <div className="tiles">
-          {data.groups.map((g) => {
-            const req = (g.docs as Doc[]).filter((d) => d.required);
-            const n = req.filter((d) => sent(d.status)).length;
-            const redo = (g.docs as Doc[]).some((d) => d.status === "REDO");
-            const all = n === req.length;
-            return (
-              <button type="button" key={g.id} className={`tile ${redo ? "attn" : all ? "done" : ""}`} onClick={() => go({ tab: "docs", group: g.id })}>
-                <b>{g.label}</b>
-                <small>{redo ? "Action required" : all ? "All sent ✓" : `${n} of ${req.length} sent`}</small>
-              </button>
-            );
-          })}
-        </div>
+        <>
+          <NextStep docs={docs} onGo={(id) => go({ tab: "docs", doc: id })} />
+          <div className="tiles">
+            {data.groups.map((g) => {
+              const req = (g.docs as Doc[]).filter((d) => d.required);
+              const n = req.filter((d) => sent(d.status)).length;
+              const redo = (g.docs as Doc[]).some((d) => d.status === "REDO");
+              const all = n === req.length;
+              return (
+                <button type="button" key={g.id} className={`tile ${redo ? "attn" : all ? "done" : ""}`} onClick={() => go({ tab: "docs", group: g.id })}>
+                  <b>{g.label}</b>
+                  <small>{redo ? "Action required" : all ? "All sent ✓" : `${n} of ${req.length} sent`}</small>
+                </button>
+              );
+            })}
+          </div>
+        </>
       );
   } else if (view.tab === "visa")
     body = (
       <div className="detail">
-        <h2 data-focus tabIndex={-1}>{data.route}</h2>
-        <p className="why">Your visa route has been confirmed by your caseworker. You do not need to do anything here.</p>
+        <h2 data-focus tabIndex={-1}>Where is my case?</h2>
+        <CaseTimeline stage={data.caseStage} />
       </div>
     );
   else if (view.tab === "me" && view.sub === "details")
@@ -158,9 +162,6 @@ export default function ClientPortal({ token: linkToken }: { token?: string }) {
     body = (
       <div className="list">
         <Row status="OK" labels={CLIENT_LABEL} onClick={() => go({ tab: "me", sub: "details" })}>Personal details</Row>
-        {/* Placeholders from the design until onboarding data exists (see build notes) */}
-        <Row status="OK" labels={CLIENT_LABEL}>Family details</Row>
-        <Row status="OK" labels={CLIENT_LABEL}>Client agreement</Row>
       </div>
     );
   else
@@ -217,6 +218,44 @@ export default function ClientPortal({ token: linkToken }: { token?: string }) {
       </div>
       {toastNode}
     </Page>
+  );
+}
+
+function NextStep({ docs, onGo }: { docs: Doc[]; onGo: (id: string) => void }) {
+  const next = findNextDoc(docs);
+  if (!next)
+    return (
+      <div className="next-step done">
+        <p><b>All done for now.</b> We&apos;ll contact you if we need anything else.</p>
+      </div>
+    );
+  const isRedo = next.status === "REDO";
+  return (
+    <div className={`next-step${isRedo ? " attn" : ""}`}>
+      <p className="eyebrow">Your next step</p>
+      <b>{next.title}</b>
+      {isRedo && next.note && <p className="muted">Your caseworker asked: {next.note}</p>}
+      <button type="button" className="big" onClick={() => onGo(next.id)}>
+        {isRedo ? "Upload again" : "Send this document"}
+      </button>
+    </div>
+  );
+}
+
+function CaseTimeline({ stage }: { stage: string }) {
+  const idx = STAGES.findIndex((s) => s.key === stage);
+  return (
+    <ol className="timeline" aria-label="Case stages">
+      {STAGES.map((s, i) => {
+        const cls = i < idx ? "past" : i === idx ? "current" : "future";
+        return (
+          <li key={s.key} className={cls}>
+            <span className="t-label">{s.label}</span>
+            {i === idx && <span className="t-detail">{s.detail}</span>}
+          </li>
+        );
+      })}
+    </ol>
   );
 }
 

@@ -348,6 +348,7 @@ function CaseView({
           )}
         </p>
         <SubmissionDate clientId={view.id} value={data.client.plannedSubmissionDate} toast={toast} onChange={() => void load()} />
+        <CaseStageSelect clientId={view.id} value={data.client.caseStage} toast={toast} onChange={() => void load()} />
         {!data.client.closedAt && (
           <>
             <button
@@ -704,6 +705,40 @@ function CaseActions({ clientId, caseRef, closed, admin, toast, onChange, onDele
 }
 
 const confirmClose = (ref: string) => window.confirm(`Close ${ref}? The client will be signed out and can no longer sign in. You can reopen it later.`);
+
+const STAGE_OPTIONS = [
+  { value: "DOCUMENTS", label: "Sending documents" },
+  { value: "CHECKING",  label: "Lawyer checking" },
+  { value: "READY",     label: "Ready to submit" },
+  { value: "SUBMITTED", label: "Submitted" },
+  { value: "DECISION",  label: "Decision" },
+];
+
+function CaseStageSelect({ clientId, value, toast, onChange }: { clientId: string; value: string; toast: (m: string) => void; onChange: () => void }) {
+  const [busy, setBusy] = useState(false);
+  async function save(stage: string) {
+    setBusy(true);
+    const r = await api<{ message: string }>(`/api/staff/cases/${clientId}`, { method: "PATCH", json: { caseStage: stage } });
+    setBusy(false);
+    if (!r.ok) return toast(r.error);
+    toast("Stage updated");
+    onChange();
+  }
+  return (
+    <section className="detail" aria-labelledby="stage-h">
+      <h2 id="stage-h">Case stage</h2>
+      <p className="muted">Shown to the client on their Visa tab as &ldquo;Where is my case?&rdquo;</p>
+      <div className="field">
+        <label htmlFor={`stage-${clientId}`} className="sr-only">Case stage</label>
+        <select id={`stage-${clientId}`} className="input" value={value} disabled={busy} onChange={(e) => save(e.target.value)}>
+          {STAGE_OPTIONS.map((o) => (
+            <option key={o.value} value={o.value}>{o.label}</option>
+          ))}
+        </select>
+      </div>
+    </section>
+  );
+}
 
 /** Planned submission date — used to turn date windows into exact dates on the client portal. */
 function SubmissionDate({ clientId, value, toast, onChange }: { clientId: string; value: string | null; toast: (m: string) => void; onChange: () => void }) {

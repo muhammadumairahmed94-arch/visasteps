@@ -27,6 +27,14 @@ enum ActorType {
   SYSTEM
 }
 
+enum CaseStage {
+  DOCUMENTS  // Sending documents (default)
+  CHECKING   // Lawyer reviewing
+  READY      // Ready to submit
+  SUBMITTED  // Sent to Home Office
+  DECISION   // Awaiting decision
+}
+
 model Firm {
   id             String     @id @default(cuid())
   name           String
@@ -82,6 +90,7 @@ model Client {
   caseworkerId     String
   caseworker       User             @relation(fields: [caseworkerId], references: [id])
   plannedSubmissionDate DateTime? // set by the caseworker; used to turn date windows into exact dates
+  caseStage        CaseStage        @default(DOCUMENTS)
   remindersPaused  Boolean          @default(false)
   reminderCount    Int              @default(0) // "missing documents" reminders sent (max 5)
   lastReminderAt   DateTime?

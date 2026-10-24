@@ -43,6 +43,7 @@ export async function clientPortalView(clientId: string) {
   return {
     firstName: c.firstName,
     route: c.route.name,
+    caseStage: c.caseStage,
     firm: { name: c.firm.name, phone: c.firm.phone, whatsapp: c.firm.whatsapp, reviewDays: c.firm.reviewDays },
     details: { name: `${c.firstName} ${c.lastName}`, mobile: c.mobile, email: c.email },
     groups: groupItems(docs).map((g) => ({
@@ -108,6 +109,7 @@ export async function staffCaseView(u: User, clientId: string) {
       accountCreated: !!c.accountCreatedAt,
       closedAt: c.closedAt ? ukDate(c.closedAt) : null,
       plannedSubmissionDate: c.plannedSubmissionDate ? c.plannedSubmissionDate.toISOString().slice(0, 10) : null,
+      caseStage: c.caseStage,
       reminders: reminderSummary(c, c.documents.filter((d) => shown(d) && d.status === "NEED" && d.checklistItem.required).length),
       storageRoot: c.accountCreatedAt ? caseFolder(c).join(" / ") : null,
     },

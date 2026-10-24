@@ -16,7 +16,8 @@ export const GET = handler(async (_req, ctx: { params: Promise<{ id: string }> }
 });
 
 const PatchCase = z.object({
-  plannedSubmissionDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use YYYY-MM-DD format").nullable(),
+  plannedSubmissionDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use YYYY-MM-DD format").nullable().optional(),
+  caseStage: z.enum(["DOCUMENTS", "CHECKING", "READY", "SUBMITTED", "DECISION"]).optional(),
 });
 
 export const PATCH = handler(async (req, ctx: { params: Promise<{ id: string }> }) => {
@@ -27,10 +28,21 @@ export const PATCH = handler(async (req, ctx: { params: Promise<{ id: string }> 
   if (!client) return fail("Not found", 404);
   const v = PatchCase.safeParse(await body(req));
   if (!v.success) return fail(v.error.issues[0].message);
+  if (v.data.plannedSubmissionDate === undefined && v.data.caseStage === undefined) return fail("Nothing to update");
   await db.client.update({
     where: { id: clientId },
-    data: { plannedSubmissionDate: v.data.plannedSubmissionDate ? new Date(v.data.plannedSubmissionDate) : null },
+    data: {
+      ...(v.data.plannedSubmissionDate !== undefined && {
+        plannedSubmissionDate: v.data.plannedSubmissionDate ? new Date(v.data.plannedSubmissionDate) : null,
+      }),
+      ...(v.data.caseStage !== undefined && { caseStage: v.data.caseStage }),
+    },
   });
-  await audit({ firmId: me.firmId, actorType: "USER", actorId: me.id, action: "staff.case.submissionDate", targetId: clientId });
+  if (v.data.plannedSubmissionDate !== undefined) {
+    await audit({ firmId: me.firmId, actorType: "USER", actorId: me.id, action: "staff.case.submissionDate", targetId: clientId });
+  }
+  if (v.data.caseStage !== undefined) {
+    await audit({ firmId: me.firmId, actorType: "USER", actorId: me.id, action: "staff.case.stageChange", targetId: clientId });
+  }
   return json({ message: "Saved" });
 });

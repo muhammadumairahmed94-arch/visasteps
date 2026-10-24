@@ -329,8 +329,50 @@ test.describe.serial("main journeys", () => {
     await expect(client.getByText(/Your caseworker usually checks documents within 2 working days/)).toBeVisible();
   });
 
+  test("7a. 'Your next step' card shows and links to the right document", async () => {
+    // Test client still has NEED documents — check the card is visible
+    await client.goto("/");
+    await expect(client.getByRole("heading", { name: /Hello/ })).toBeVisible();
+    // "Your next step" card is at the top of the Documents tab
+    await expect(client.getByText("Your next step")).toBeVisible();
+    const btn = client.getByRole("button", { name: /Send this document|Upload again/ });
+    await expect(btn).toBeVisible();
+    // Click it — should navigate into a document screen
+    const docTitle = await client.locator(".next-step b").textContent();
+    await btn.click();
+    await expect(client.getByRole("heading", { level: 2, name: new RegExp(docTitle!) })).toBeVisible();
+  });
+
+  test("7b. case stage timeline: caseworker sets stage, client sees it", async () => {
+    // Caseworker sets case stage to "SUBMITTED" on the test client
+    await staff.goto(`/staff#c/${clientCaseId}/client`);
+    await staff.reload();
+    await expect(staff.getByRole("heading", { name: "Case stage" })).toBeVisible();
+    await staff.getByRole("region", { name: "Case stage" }).getByRole("combobox").selectOption("SUBMITTED");
+    await expect(staff.getByText("Stage updated")).toBeVisible();
+
+    // Client's Visa tab now shows the timeline with Submitted as current
+    await client.goto("/");
+    await client.getByRole("tab", { name: "Visa" }).click();
+    await expect(client.getByRole("heading", { level: 2, name: "Where is my case?" })).toBeVisible();
+    await expect(client.getByText("Submitted")).toBeVisible();
+    await expect(client.getByText(/Your application has been sent to the Home Office/)).toBeVisible();
+    // Earlier stages should be visible but not show their detail text
+    await expect(client.getByText("Sending documents")).toBeVisible();
+    await expect(client.getByText(/You are sending us your documents/)).toHaveCount(0);
+  });
+
+  test("7c. profile tab no longer shows placeholder rows", async () => {
+    await client.goto("/");
+    await client.getByRole("tab", { name: "Profile" }).click();
+    await expect(client.getByText("Family details")).toHaveCount(0);
+    await expect(client.getByText("Client agreement")).toHaveCount(0);
+    await expect(client.getByText("Personal details")).toBeVisible();
+  });
+
   test("6. close and reopen a case; admin deletes a client (documents kept)", async ({ playwright }) => {
     staff.on("dialog", (d) => d.accept());
+
     const login = async () => {
       const r = await playwright.request.newContext({ baseURL: E2E.APP_URL, extraHTTPHeaders: { Origin: E2E.APP_URL } });
       const res = await r.post("/api/auth/client/login", { data: { email: "amina.khan@example.com", password: E2E.SEED_CLIENT_PASSWORD } });
@@ -372,5 +414,51 @@ test.describe.serial("main journeys", () => {
     await expect(staff.getByRole("heading", { name: "Clients" })).toBeVisible();
     expect((await staff.request.get(`/api/staff/cases/${clientCaseId}`)).status()).toBe(404);
     expect(readdirSync(path.join(E2E.LOCAL_STORAGE_DIR, "Clients", folder, "01 Identity")).length).toBeGreaterThan(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Phone-sized (375 px) — Amina's account is re-opened at the end of test 6
+// ---------------------------------------------------------------------------
+test.describe.serial("phone (375 px) — next step card and stage timeline", () => {
+  test.use({ viewport: { width: 375, height: 667 } });
+
+  let phone: Page;
+
+  test.beforeAll(async ({ browser }) => {
+    phone = await (await browser.newContext()).newPage();
+  });
+
+  test("signs in and sees the next step card", async ({ playwright }) => {
+    // Sign in as Amina (re-opened in test 6)
+    const ctx = await playwright.request.newContext({ baseURL: E2E.APP_URL, extraHTTPHeaders: { Origin: E2E.APP_URL } });
+    await ctx.post("/api/auth/client/login", { data: { email: "amina.khan@example.com", password: E2E.SEED_CLIENT_PASSWORD } });
+    // Grab the session cookie and give it to the phone page's context
+    const cookies = (await ctx.storageState()).cookies;
+    await phone.context().addCookies(cookies);
+    await ctx.dispose();
+
+    await phone.goto("/");
+    await expect(phone.getByRole("heading", { name: /Hello Amina/ })).toBeVisible();
+    // Next step card is visible at 375 px
+    await expect(phone.getByText("Your next step").or(phone.getByText("All done for now."))).toBeVisible();
+  });
+
+  test("Visa tab timeline is readable on phone", async () => {
+    await phone.goto("/");
+    await phone.getByRole("tab", { name: "Visa" }).click();
+    await expect(phone.getByRole("heading", { level: 2, name: "Where is my case?" })).toBeVisible();
+    // All 5 stage labels fit in the viewport
+    for (const label of ["Sending documents", "Lawyer checking", "Ready to submit", "Submitted", "Decision"]) {
+      await expect(phone.getByText(label)).toBeVisible();
+    }
+  });
+
+  test("Profile tab shows only Personal details (no placeholders)", async () => {
+    await phone.goto("/");
+    await phone.getByRole("tab", { name: "Profile" }).click();
+    await expect(phone.getByText("Personal details")).toBeVisible();
+    await expect(phone.getByText("Family details")).toHaveCount(0);
+    await expect(phone.getByText("Client agreement")).toHaveCount(0);
   });
 });
