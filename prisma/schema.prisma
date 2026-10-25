@@ -204,6 +204,7 @@ model Session {
   userId     String?
   user       User?        @relation(fields: [userId], references: [id], onDelete: Cascade)
   stage      SessionStage @default(FULL)
+  remember   Boolean      @default(false)
   expiresAt  DateTime
   lastSeenAt DateTime     @default(now())
   createdAt  DateTime     @default(now())

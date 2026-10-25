@@ -86,6 +86,7 @@ export default function ClientSignIn({ token, onDone }: { token?: string; onDone
             <p id="mobile-hint" className="hint">Optional. Your caseworker may call you on this number.</p>
           </div>
           <Password label="Choose a password" autoComplete="new-password" hint="At least 8 characters." />
+          <RememberMe />
           {err}
           <button className="big" disabled={busy}>{busy ? "Creating account…" : "Create account"}</button>
         </form>
@@ -103,6 +104,7 @@ export default function ClientSignIn({ token, onDone }: { token?: string; onDone
         <form className="detail" noValidate onSubmit={(e) => (e.preventDefault(), submit("/api/auth/client/setup", { ...values(e), token: token! }, onDone))}>
           <input type="hidden" name="username" value={step.link.email} autoComplete="username" />
           <Password label="New password" autoComplete="new-password" hint="At least 8 characters." />
+          <RememberMe />
           {err}
           <button className="big" disabled={busy}>{busy ? "Saving…" : "Save and sign in"}</button>
         </form>

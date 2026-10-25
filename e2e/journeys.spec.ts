@@ -471,6 +471,40 @@ test.describe.serial("main journeys", () => {
     await ctx.dispose();
   });
 
+  test("10a. account setup: remember ticked → 30-day persistent cookie", async ({ playwright }) => {
+    const forgotCtx = await playwright.request.newContext({ baseURL: E2E.APP_URL, extraHTTPHeaders: { Origin: E2E.APP_URL } });
+    await forgotCtx.post("/api/auth/client/forgot", { data: { email: clientEmail } });
+    await forgotCtx.dispose();
+
+    // sendResetLink is synchronous so the file is on disk before the response arrives
+    const mail = await mailTo(clientEmail, /password reset/);
+    const token = mail.action!.url.split("/i/")[1];
+
+    const ctx = await playwright.request.newContext({ baseURL: E2E.APP_URL, extraHTTPHeaders: { Origin: E2E.APP_URL } });
+    const r = await ctx.post("/api/auth/client/setup", { data: { token, password: "e2e-reset-10a", remember: "on" } });
+    expect(r.status()).toBe(200);
+    expect((r.headers()["set-cookie"] ?? "").toLowerCase(), "persistent cookie must have Expires").toMatch(/expires=/);
+    await ctx.dispose();
+  });
+
+  test("10b. account setup: remember unticked → session cookie (no Expires)", async ({ playwright }) => {
+    const forgotCtx = await playwright.request.newContext({ baseURL: E2E.APP_URL, extraHTTPHeaders: { Origin: E2E.APP_URL } });
+    await forgotCtx.post("/api/auth/client/forgot", { data: { email: clientEmail } });
+    await forgotCtx.dispose();
+
+    // mailTo returns the latest email; test 10a's token was already used so this new one is needed
+    const mail = await mailTo(clientEmail, /password reset/);
+    const token = mail.action!.url.split("/i/")[1];
+
+    const ctx = await playwright.request.newContext({ baseURL: E2E.APP_URL, extraHTTPHeaders: { Origin: E2E.APP_URL } });
+    const r = await ctx.post("/api/auth/client/setup", { data: { token, password: "e2e-reset-10b" } }); // no remember
+    expect(r.status()).toBe(200);
+    const setCookie = r.headers()["set-cookie"] ?? "";
+    expect(setCookie.toLowerCase(), "session cookie must not have Expires").not.toMatch(/expires=/);
+    expect(setCookie.toLowerCase(), "session cookie must not have Max-Age").not.toMatch(/max-age=/);
+    await ctx.dispose();
+  });
+
   test("6. close and reopen a case; admin deletes a client (documents kept)", async ({ playwright }) => {
     staff.on("dialog", (d) => d.accept());
 

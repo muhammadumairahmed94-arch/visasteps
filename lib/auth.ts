@@ -32,12 +32,14 @@ export async function startSession(
   stage: SessionStage = "FULL",
   options?: { remember?: boolean },
 ) {
-  const remember = options?.remember !== false; // default true
+  // Client sessions default to false (session cookie + 12-hour DB window).
+  // Staff sessions default to true (persistent cookie).
+  const remember = options?.remember ?? (kind !== "client");
   await endSession(kind); // never keep two sessions in one browser
   const token = randomToken();
   const ttl = stage === "MFA" ? MFA_TTL : remember ? KINDS[kind].ttl : SHORT_TTL;
   const expiresAt = new Date(Date.now() + ttl);
-  await db.session.create({ data: { tokenHash: sha256(token), expiresAt, stage, ...owner } });
+  await db.session.create({ data: { tokenHash: sha256(token), expiresAt, stage, remember, ...owner } });
   // Session cookie (no Expires) when remember=false; persistent otherwise
   await setCookie(kind, token, stage === "MFA" || remember ? expiresAt : undefined);
 }
@@ -47,15 +49,13 @@ async function current(kind: Kind, stage: SessionStage = "FULL") {
   if (!token) return null;
   const s = await db.session.findUnique({ where: { tokenHash: sha256(token) }, include: { client: true, user: true } });
   if (!s || s.expiresAt < new Date() || s.stage !== stage) return null;
-  // Slide the expiry, at most once an hour per session.
-  // Detect short sessions by comparing expiresAt to lastSeenAt: ~12 h for short, ~30 d for long.
+  // Slide the expiry at most once an hour per session.
   if (kind === "client" && Date.now() - s.lastSeenAt.getTime() > 60 * 60 * 1000) {
-    const isShort = s.expiresAt.getTime() - s.lastSeenAt.getTime() < 2 * DAY;
-    const ttl = isShort ? SHORT_TTL : KINDS[kind].ttl;
+    const ttl = s.remember ? KINDS[kind].ttl : SHORT_TTL;
     const expiresAt = new Date(Date.now() + ttl);
     await db.session.update({ where: { id: s.id }, data: { lastSeenAt: new Date(), expiresAt } });
     // Short sessions are already session cookies — no need to re-set the cookie.
-    if (!isShort) await setCookie(kind, token, expiresAt);
+    if (s.remember) await setCookie(kind, token, expiresAt);
   }
   return s;
 }

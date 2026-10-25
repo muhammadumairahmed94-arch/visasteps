@@ -24,7 +24,7 @@ const Details = z.object({
 /** Create the account (SETUP link) or choose a new password (RESET link). Signs the client in. */
 export const POST = handler(async (req) => {
   await limit("link");
-  const input = await body<{ token: string; password: string; firstName: string; lastName: string; mobile: string }>(req);
+  const input = await body<{ token: string; password: string; firstName: string; lastName: string; mobile: string; remember?: unknown }>(req);
   const link = await findLink(input.token);
   if (!link) return fail("This link has expired or was already used.", 410);
 
@@ -52,8 +52,9 @@ export const POST = handler(async (req) => {
     await db.session.deleteMany({ where: { clientId: client.id } }); // sign out other devices
   }
 
+  const remember = input.remember === "on" || input.remember === true || input.remember === "true";
   await db.invite.update({ where: { id: link.id }, data: { usedAt: new Date() } });
-  await startSession("client", { clientId: client.id });
+  await startSession("client", { clientId: client.id }, "FULL", { remember });
   await audit({ firmId: client.firmId, actorType: "CLIENT", actorId: client.id, action: link.kind === "SETUP" ? "client.account.create" : "client.password.reset" });
   return json({ ok: true });
 });
