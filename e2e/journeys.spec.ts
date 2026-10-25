@@ -49,6 +49,9 @@ async function mailTo(to: string, subject: RegExp): Promise<Mail> {
   throw new Error(`No email to ${to} matching ${subject}`);
 }
 
+/** Shared TOTP key set during first-time setup; reused by subsequent sign-ins in the same run. */
+let adminTotpKey = "";
+
 /** Admin sign-in including first-time authenticator setup (the test plays the phone app). */
 async function staffSignIn(browser: Browser): Promise<{ ctx: BrowserContext; page: Page }> {
   const ctx = await browser.newContext();
@@ -58,12 +61,27 @@ async function staffSignIn(browser: Browser): Promise<{ ctx: BrowserContext; pag
   await page.getByLabel("Password").fill(E2E.SEED_ADMIN_PASSWORD);
   await page.getByRole("button", { name: "Continue" }).click();
   await expect(page.getByRole("heading", { name: "Set up two-step sign-in" })).toBeVisible();
-  const key = (await page.locator(".muted .fn").textContent())!.replace(/\s/g, "");
-  await page.getByLabel(/6-digit code/).fill(new TOTP({ secret: Secret.fromBase32(key) }).generate());
+  adminTotpKey = (await page.locator(".muted .fn").textContent())!.replace(/\s/g, "");
+  await page.getByLabel(/6-digit code/).fill(new TOTP({ secret: Secret.fromBase32(adminTotpKey) }).generate());
   await page.getByRole("button", { name: "Confirm and sign in" }).click();
   await expect(page.getByRole("heading", { name: "Save your recovery codes" })).toBeVisible();
   await page.getByLabel("I have saved these codes somewhere safe").check();
   await page.getByRole("button", { name: "Continue" }).click();
+  await expect(page.getByRole("heading", { name: "Clients" })).toBeVisible();
+  return { ctx, page };
+}
+
+/** Admin sign-in when TOTP is already configured (uses the key captured by staffSignIn). */
+async function staffSignInExisting(browser: Browser): Promise<{ ctx: BrowserContext; page: Page }> {
+  const ctx = await browser.newContext();
+  const page = await ctx.newPage();
+  await page.goto("/staff");
+  await page.getByLabel("Email").fill("info@uhalegal.com");
+  await page.getByLabel("Password").fill(E2E.SEED_ADMIN_PASSWORD);
+  await page.getByRole("button", { name: "Continue" }).click();
+  await expect(page.getByRole("heading", { name: "Enter your code" })).toBeVisible();
+  await page.getByLabel(/6-digit code/).fill(new TOTP({ secret: Secret.fromBase32(adminTotpKey) }).generate());
+  await page.getByRole("button", { name: "Sign in" }).click();
   await expect(page.getByRole("heading", { name: "Clients" })).toBeVisible();
   return { ctx, page };
 }
@@ -695,3 +713,85 @@ test.describe.serial("phone (375 px) — chunked upload", () => {
     await expect(phone2.getByText(/Received\. Your caseworker usually checks/)).toBeVisible({ timeout: 20000 });
   });
 });
+
+// ---------------------------------------------------------------------------
+// Messaging — client sends a message, caseworker sees the unread badge,
+// replies, client sees the reply. Runs on a phone-sized screen (375 × 667).
+// Uses Amina's seeded account (re-opened by test 6) and the admin caseworker.
+// ---------------------------------------------------------------------------
+test.describe.serial("messaging", () => {
+  test.use({ viewport: { width: 375, height: 667 } });
+
+  let phoneClient: Page;
+  let phoneStaff: Page;
+  let aminaCaseId = "";
+
+  test.beforeAll(async ({ browser, playwright }) => {
+    // Sign Amina in through the API and carry the session into a phone browser
+    const aminaCtx = await playwright.request.newContext({ baseURL: E2E.APP_URL, extraHTTPHeaders: { Origin: E2E.APP_URL } });
+    await aminaCtx.post("/api/auth/client/login", { data: { email: "amina.khan@example.com", password: E2E.SEED_CLIENT_PASSWORD } });
+    const aminaCookies = (await aminaCtx.storageState()).cookies;
+    await aminaCtx.dispose();
+
+    const clientBrowserCtx = await browser.newContext({ viewport: { width: 375, height: 667 } });
+    await clientBrowserCtx.addCookies(aminaCookies);
+    phoneClient = await clientBrowserCtx.newPage();
+
+    // Sign the admin in on a phone-sized staff browser (TOTP already configured by main journeys)
+    const { page } = await staffSignInExisting(browser);
+    phoneStaff = page;
+    await phoneStaff.setViewportSize({ width: 375, height: 667 });
+
+    // Locate Amina's case id from the staff list
+    await phoneStaff.goto("/staff");
+    await phoneStaff.reload();
+    const aminaBtn = phoneStaff.getByRole("button", { name: /^Amina Khan/ });
+    await aminaBtn.click();
+    aminaCaseId = phoneStaff.url().split("#c/")[1].split("/")[0];
+  });
+
+  test("client sends a message; caseworker sees unread badge and the message", async () => {
+    // Client opens Messages tab and sends a message
+    await phoneClient.goto("/");
+    await phoneClient.getByRole("tab", { name: /Messages/ }).click();
+    await expect(phoneClient.getByRole("heading", { name: "Messages" })).toBeVisible();
+    // Wait for the thread to finish loading (textarea only appears after the fetch resolves)
+    await expect(phoneClient.getByLabel("Message", { exact: true })).toBeVisible();
+    await phoneClient.getByLabel("Message", { exact: true }).fill("Hello, I have a question about my passport.");
+    await phoneClient.getByRole("button", { name: "Send" }).click();
+    await expect(phoneClient.getByText("Hello, I have a question about my passport.")).toBeVisible();
+
+    // Caseworker opens Amina's case and sees the unread badge on the Messages tab
+    await phoneStaff.goto("/staff");
+    await phoneStaff.reload();
+    await phoneStaff.getByRole("button", { name: /^Amina Khan/ }).click();
+    await expect(phoneStaff.getByRole("tab", { name: /Messages \(1\)/ })).toBeVisible();
+
+    // Caseworker opens the Messages tab and sees the message
+    await phoneStaff.getByRole("tab", { name: /Messages/ }).click();
+    await expect(phoneStaff.getByText("Hello, I have a question about my passport.")).toBeVisible();
+  });
+
+  test("caseworker replies; client sees the reply; unread badge clears", async () => {
+    // Caseworker replies (still on the Messages tab from the previous test)
+    await phoneStaff.goto(`/staff#c/${aminaCaseId}/messages`);
+    await phoneStaff.reload();
+    await expect(phoneStaff.getByText("Hello, I have a question about my passport.")).toBeVisible();
+    // Wait for thread to load
+    await expect(phoneStaff.getByLabel("Message", { exact: true })).toBeVisible();
+    await phoneStaff.getByLabel("Message", { exact: true }).fill("Of course, what would you like to know?");
+    await phoneStaff.getByRole("button", { name: "Send" }).click();
+    await expect(phoneStaff.getByText("Of course, what would you like to know?")).toBeVisible();
+
+    // Client reloads and sees the Messages tab has an unread badge
+    await phoneClient.goto("/");
+    await expect(phoneClient.getByRole("tab", { name: /Messages \(1\)/ })).toBeVisible();
+
+    // Client opens Messages and sees the caseworker's reply
+    await phoneClient.getByRole("tab", { name: /Messages/ }).click();
+    await expect(phoneClient.getByText("Of course, what would you like to know?")).toBeVisible();
+
+    // After opening, the badge clears
+    await expect(phoneClient.getByRole("tab", { name: /Messages \(/ })).toHaveCount(0);
+  });
+})

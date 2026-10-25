@@ -6,16 +6,17 @@ import { guideShape } from "@/lib/files";
 import { STAGES, findNextDoc } from "@/lib/case-stage";
 import ClientSignIn from "./ClientSignIn";
 import ScanFlow from "./ScanFlow";
+import MessageThread from "./MessageThread";
 import { CLIENT_LABEL, Page, Row, Tabs, api, useHashView, useToast, type Status } from "./ui";
 
-type Tab = "docs" | "visa" | "me" | "help";
+type Tab = "docs" | "visa" | "messages" | "me" | "help";
 type View = { tab: Tab; group?: string; doc?: string; sub?: string };
 type Doc = ClientPortalView["groups"][number]["docs"][number] & { status: Status; dates: string | null; exampleImage: string | null; howToGet: string | null; missingAt: string | null; missingResponse: string | null };
 const sent = (s: Status) => s === "SENT" || s === "OK";
 
 const parse = (h: string): View => {
   const [tab, kind, id] = h.split("/");
-  if (tab === "visa" || tab === "help") return { tab };
+  if (tab === "visa" || tab === "help" || tab === "messages") return { tab };
   if (tab === "me") return { tab, sub: kind };
   return { tab: "docs", group: kind === "g" ? id : undefined, doc: kind === "d" ? id : undefined };
 };
@@ -26,6 +27,7 @@ export default function ClientPortal({ token: linkToken }: { token?: string }) {
   const [token, setToken] = useState(linkToken);
   const [data, setData] = useState<ClientPortalView | null>(null);
   const [state, setState] = useState<"loading" | "signedOut" | "in">(token ? "signedOut" : "loading");
+  const [unreadMessages, setUnreadMessages] = useState(0);
   const [view, go] = useHashView(parse, format);
   const [toast, toastNode] = useToast();
 
@@ -34,6 +36,7 @@ export default function ClientPortal({ token: linkToken }: { token?: string }) {
       api<ClientPortalView>("/api/client/portal").then((r) => {
         if (r.ok) {
           setData(r.data);
+          setUnreadMessages(r.data.unreadMessages);
           setState("in");
         } else setState("signedOut");
       }),
@@ -137,6 +140,17 @@ export default function ClientPortal({ token: linkToken }: { token?: string }) {
         <CaseTimeline stage={data.caseStage} />
       </div>
     );
+  else if (view.tab === "messages")
+    body = (
+      <>
+        <h2 data-focus tabIndex={-1}>Messages</h2>
+        <MessageThread
+          endpoint="/api/client/messages"
+          senderKind="CLIENT"
+          onRead={() => setUnreadMessages(0)}
+        />
+      </>
+    );
   else if (view.tab === "me" && view.sub === "details")
     body = (
       <>
@@ -209,7 +223,13 @@ export default function ClientPortal({ token: linkToken }: { token?: string }) {
       </section>
       <Tabs<Tab>
         label="Sections"
-        tabs={[["docs", "Documents"], ["visa", "Visa"], ["me", "Profile"], ["help", "Help"]]}
+        tabs={[
+          ["docs", "Documents"],
+          ["visa", "Visa"],
+          ["messages", unreadMessages > 0 ? `Messages (${unreadMessages})` : "Messages"],
+          ["me", "Profile"],
+          ["help", "Help"],
+        ]}
         value={view.tab}
         onChange={(t) => go({ tab: t })}
       />

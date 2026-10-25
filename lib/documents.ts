@@ -38,12 +38,16 @@ export async function clientPortalView(clientId: string) {
       documents: { include: { checklistItem: true, files: current } },
     },
   });
+  const unreadMessages = await db.message.count({
+    where: { clientId, senderKind: "STAFF", readAt: null },
+  });
   const anchor = c.plannedSubmissionDate ?? ukToday();
   const docs = c.documents.filter(shown).map((d) => ({ ...d.checklistItem, doc: d }));
   return {
     firstName: c.firstName,
     route: c.route.name,
     caseStage: c.caseStage,
+    unreadMessages,
     firm: { name: c.firm.name, phone: c.firm.phone, whatsapp: c.firm.whatsapp, reviewDays: c.firm.reviewDays },
     details: { name: `${c.firstName} ${c.lastName}`, mobile: c.mobile, email: c.email },
     groups: groupItems(docs).map((g) => ({
@@ -79,6 +83,16 @@ export async function staffCaseList(u: User) {
     include: { route: true, documents: { include: { checklistItem: true } } },
     orderBy: { createdAt: "desc" },
   });
+  const clientIds = clients.map((c) => c.id);
+  const unreadMap = new Map<string, number>();
+  if (clientIds.length > 0) {
+    const rows = await db.message.groupBy({
+      by: ["clientId"],
+      where: { clientId: { in: clientIds }, senderKind: "CLIENT", readAt: null },
+      _count: { _all: true },
+    });
+    for (const r of rows) unreadMap.set(r.clientId, r._count._all);
+  }
   return clients.map((c) => ({
     id: c.id,
     name: fullName(c),
@@ -88,6 +102,7 @@ export async function staffCaseList(u: User) {
     route: c.route.name,
     toReview: c.documents.filter((d) => d.status === "SENT").length,
     missing: c.documents.filter((d) => shown(d) && d.status === "NEED" && d.checklistItem.required).length,
+    unread: unreadMap.get(c.id) ?? 0,
   }));
 }
 
@@ -97,6 +112,9 @@ export async function staffCaseView(u: User, clientId: string) {
     include: { route: true, caseworker: true, documents: { include: { checklistItem: true, files: current } } },
   });
   if (!c) return null;
+  const unreadMessages = await db.message.count({
+    where: { clientId: c.id, senderKind: "CLIENT", readAt: null },
+  });
   const docs = c.documents.filter(shown).map((d) => ({ ...d.checklistItem, doc: d }));
   return {
     client: {
@@ -113,6 +131,7 @@ export async function staffCaseView(u: User, clientId: string) {
       caseStage: c.caseStage,
       reminders: reminderSummary(c, c.documents.filter((d) => shown(d) && d.status === "NEED" && d.checklistItem.required).length),
       storageRoot: c.accountCreatedAt ? caseFolder(c).join(" / ") : null,
+      unreadMessages,
     },
     groups: groupItems(docs).map((g) => ({
       id: g.folder,

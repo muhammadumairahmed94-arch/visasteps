@@ -54,6 +54,9 @@ export const TEXT: Record<string, string> = {
   // Reminders
   "reminders.pause": "Reminders paused",
   "reminders.resume": "Reminders resumed",
+  // Messaging
+  "message.send": "Message sent",
+  "message.view": "Viewed messages",
   // Admin
   "admin.firm.update": "Firm settings saved",
   "admin.user.add": "Team member added",

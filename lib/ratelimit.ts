@@ -16,9 +16,13 @@ export const LIMITS = {
   uploadChunk: { max: 300, window: 10 * MIN },  // per client: send a chunk
   reportMissing: { max: 10, window: 60 * MIN }, // per client
   createClient: { max: 50, window: 60 * MIN },  // per caseworker
-  otpRequest:      { max: 5,  window: 60 * MIN },   // per IP: requesting an OTP code
-  otpRequestEmail: { max: 3,  window: 60 * MIN },   // per email: prevents inbox flooding
-  otpVerify:       { max: 10, window: 15 * MIN },   // per IP: verifying a code
+  otpRequest:         { max: 5,  window: 60 * MIN },   // per IP: requesting an OTP code
+  otpRequestEmail:    { max: 3,  window: 60 * MIN },   // per email: prevents inbox flooding
+  otpVerify:          { max: 10, window: 15 * MIN },   // per IP: verifying a code
+  messageClient:      { max: 20, window: 60 * MIN },   // per client: sending messages
+  messageStaff:       { max: 60, window: 60 * MIN },   // per staff user: sending messages
+  messageNotifyClient: { max: 1, window: 15 * MIN },   // per client: email notifications to client (reset on read)
+  messageNotifyStaff:  { max: 1, window: 15 * MIN },   // per case: email notifications to caseworker (reset on read)
 } as const;
 
 export type LimitName = keyof typeof LIMITS;

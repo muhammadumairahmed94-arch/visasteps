@@ -71,6 +71,7 @@ model User {
   clients       Client[]
   sessions      Session[]
   invites       Invite[]
+  messages      Message[]
 }
 
 model Client {
@@ -103,6 +104,7 @@ model Client {
   sessions         Session[]
   signInCodes      SignInCode[]
   uploadSessions   UploadSession[]
+  messages         Message[]
 
   @@unique([firmId, caseRef])
 }
@@ -306,6 +308,26 @@ model UploadSession {
   completingAt DateTime?      // set atomically when complete starts; prevents double-processing
   expiresAt    DateTime
   createdAt    DateTime       @default(now())
+
+  @@index([clientId])
+}
+
+/**
+ * Encrypted message between a client and their caseworker.
+ * body is AES-256-GCM encrypted with purpose "message" — never stored plain.
+ * readAt is set when the OTHER party first views the thread (caseworker for CLIENT messages, client for STAFF messages).
+ * Only the assigned caseworker's GET marks client messages as read; admin views are silent.
+ */
+model Message {
+  id         String    @id @default(cuid())
+  clientId   String
+  client     Client    @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  senderKind String    // "CLIENT" | "STAFF"
+  staffId    String?
+  staff      User?     @relation(fields: [staffId], references: [id], onDelete: SetNull)
+  body       String    // encrypt(text, "message")
+  createdAt  DateTime  @default(now())
+  readAt     DateTime?
 
   @@index([clientId])
 }

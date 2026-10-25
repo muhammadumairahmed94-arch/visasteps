@@ -28,6 +28,7 @@ the **controller** of your personal data.
 | Documents you upload | Passports, marriage certificate, payslips, bank statements, tenancy, English test, TB certificate, photographs, your partner's passport | To prepare and support your visa application |
 | Information in those documents | May include **special category data** (e.g. health information on a TB certificate, information revealing religion on a marriage certificate) and data about **your partner/sponsor** and **your employer** | As above |
 | Case information | Case reference, visa route, which documents are received, caseworker notes | To manage your case |
+| Portal messages | Text messages exchanged between you and your caseworker inside the portal (encrypted at rest; email notifications contain no message text) | To let you ask questions and receive updates without leaving the portal |
 | Technical | IP address, date and time of actions | Security, fraud prevention and a record of who did what (audit log) |
 
 We do not use cookies for advertising or tracking. The portal uses one essential cookie to keep you signed in.

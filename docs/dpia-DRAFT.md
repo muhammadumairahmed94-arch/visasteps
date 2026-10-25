@@ -17,7 +17,8 @@ Large volumes of identity documents (passports), financial records and some **sp
 - **Data subjects:** clients; their partners/sponsors; employers named in documents; UHA Legal staff.
 - **Flow:** caseworker invites client by email → client creates an account → uploads photos/PDFs → file checked
   (type, size, virus scan), converted to PDF, renamed, saved to the firm's OneDrive → caseworker approves or asks
-  for a redo → reminders by email. Every action recorded in an audit log.
+  for a redo → reminders by email. Client and caseworker can exchange text messages inside the portal. Every action
+  recorded in an audit log.
 - **Systems:** DigitalOcean server in London (portal, database, virus scanner); Microsoft OneDrive (documents and
   encrypted nightly database backups); Hostinger email (notifications).
 - **Volume:** [expected clients per year ___ ; documents per client ~10–20].
@@ -52,6 +53,7 @@ Large volumes of identity documents (passports), financial records and some **sp
 | R10 | Third-party data (partners/sponsors) without their knowledge | Likely / Medium | [Ask clients to share the privacy notice with partners/sponsors; consider a line on the account-creation page] | Medium — action needed |
 | R11 | Inline scripts allowed by the browser security policy | Unlikely / Medium | No user-written HTML rendered; React escaping; other headers strict | Low (accepted) |
 | R12 | Staff misuse | Unlikely / High | Role-based access; audit log of views, opens and changes, visible per client | Low |
+| R13 | Message content intercepted or read by wrong party | Possible / High | Messages encrypted at rest (AES-256-GCM, key not in the database); only the client and their assigned caseworker can access the thread; email notifications contain no message text; rate-limited sends; messages deleted when the case is deleted | Low |
 
 ## 6. Actions before launch
 

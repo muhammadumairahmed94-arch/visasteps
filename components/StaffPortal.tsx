@@ -4,21 +4,22 @@ import { useCallback, useEffect, useState, type FormEvent } from "react";
 import type { StaffCaseView } from "@/lib/documents";
 import StaffSignIn from "./StaffSignIn";
 import AdminPanel from "./AdminPanel";
+import MessageThread from "./MessageThread";
 import { STAFF_LABEL, Page, Row, StatusPill, Tabs, api, useHashView, useToast, type Status } from "./ui";
 
-type Tab = "review" | "missing" | "folders" | "client";
+type Tab = "review" | "missing" | "folders" | "client" | "messages";
 type AdminTab = "team" | "firm" | "checklists";
 type View = { screen: "list" } | { screen: "new" } | { screen: "admin"; tab: AdminTab } | { screen: "case"; id: string; tab: Tab; group?: string; doc?: string };
 type Home = {
   me: { id: string; name: string; role: "ADMIN" | "CASEWORKER" };
-  cases: { id: string; name: string; accountCreated: boolean; closed: boolean; caseRef: string; route: string; toReview: number; missing: number }[];
+  cases: { id: string; name: string; accountCreated: boolean; closed: boolean; caseRef: string; route: string; toReview: number; missing: number; unread: number }[];
   routes: { id: string; name: string }[];
   caseworkers: { id: string; name: string }[];
   storageWarning: string | null;
 };
 type Doc = StaffCaseView["groups"][number]["docs"][number] & { status: Status };
 
-const TABS: Tab[] = ["review", "missing", "folders", "client"];
+const TABS: Tab[] = ["review", "missing", "folders", "client", "messages"];
 const parse = (h: string): View => {
   const [a, id, tab, kind, x] = h.split("/");
   if (a === "new") return { screen: "new" };
@@ -127,8 +128,8 @@ export default function StaffPortal() {
                   <br />
                   <span className="muted">{c.caseRef} · {c.route}</span>
                 </span>
-                <span className={`pill ${c.toReview ? "p-sent" : ""}`}>
-                  {c.closed ? "Closed" : !c.accountCreated ? "Invite sent" : c.toReview ? `${c.toReview} to review` : c.missing ? `${c.missing} missing` : "All in"}
+                <span className={`pill ${c.toReview ? "p-sent" : c.unread && !c.closed && c.accountCreated ? "p-msg" : ""}`}>
+                  {c.closed ? "Closed" : !c.accountCreated ? "Invite sent" : c.toReview ? `${c.toReview} to review` : c.missing ? `${c.missing} missing` : c.unread ? `${c.unread} message${c.unread === 1 ? "" : "s"}` : "All in"}
                 </span>
                 <span className="chev" aria-hidden="true">›</span>
               </button>
@@ -227,11 +228,14 @@ function CaseView({
 }) {
   const [data, setData] = useState<StaffCaseView | null>(null);
   const [missing, setMissing] = useState(false);
+  const [unread, setUnread] = useState(0);
   const load = useCallback(
     () =>
       api<StaffCaseView>(`/api/staff/cases/${view.id}`).then((r) => {
-        if (r.ok) setData(r.data);
-        else setMissing(true);
+        if (r.ok) {
+          setData(r.data);
+          setUnread(r.data.client.unreadMessages);
+        } else setMissing(true);
       }),
     [view.id],
   );
@@ -320,7 +324,15 @@ function CaseView({
         })}
       </div>
     );
-  } else
+  } else if (view.tab === "messages")
+    body = (
+      <MessageThread
+        endpoint={`/api/staff/messages/${view.id}`}
+        senderKind="STAFF"
+        onRead={() => setUnread(0)}
+      />
+    );
+  else
     body = (
       <div className="detail">
         <h2 data-focus tabIndex={-1}>{data.client.name}</h2>
@@ -398,7 +410,13 @@ function CaseView({
       </section>
       <Tabs<Tab>
         label="Case sections"
-        tabs={[["review", "To review"], ["missing", "Missing"], ["folders", "Folders"], ["client", "Client"]]}
+        tabs={[
+          ["review", "To review"],
+          ["missing", "Missing"],
+          ["folders", "Folders"],
+          ["client", "Client"],
+          ["messages", unread > 0 ? `Messages (${unread})` : "Messages"],
+        ]}
         value={view.tab}
         onChange={(t) => go({ screen: "case", id: view.id, tab: t })}
       />
