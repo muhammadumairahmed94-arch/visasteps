@@ -2,7 +2,7 @@ import bcrypt from "bcryptjs";
 import type { Client, Firm, LinkKind } from "@prisma/client";
 import { db } from "./db";
 import { hmac, randomToken, safeEqual, sha256, sixDigitCode } from "./crypto";
-import { sendSafely } from "./adapters/email";
+import { sendSafely, email as emailAdapter } from "./adapters/email";
 
 const HOUR = 60 * 60 * 1000;
 const LINK_TTL: Record<LinkKind, number> = { SETUP: 7 * 24 * HOUR, RESET: HOUR, STAFF: 7 * 24 * HOUR };
@@ -131,21 +131,25 @@ export function validateOtpCode(
 }
 
 /** Creates a new code for the client, cancelling any previous unused one. Returns the plaintext code (never stored). */
-async function createSignInCode(clientId: string): Promise<string> {
+export async function createSignInCode(clientId: string): Promise<string> {
   const code = sixDigitCode();
   await db.signInCode.updateMany({ where: { clientId, usedAt: null }, data: { usedAt: new Date() } });
   await db.signInCode.create({ data: { clientId, codeHash: hmac(code), expiresAt: new Date(Date.now() + OTP_TTL) } });
   return code;
 }
 
-export async function sendOtpCode(client: Client, firm: Firm): Promise<boolean> {
-  const code = await createSignInCode(client.id);
-  return sendSafely({
-    to: client.email,
-    brand: firm.name,
-    subject: `${firm.name}: your sign-in code`,
-    text: `Your sign-in code is: ${code}\n\nIt is valid for 10 minutes and can only be used once.\n\nIf you did not request this code, you can ignore this message.`,
-  });
+/** Sends the OTP email without logging the recipient or code on failure. */
+export async function sendOtpEmail(code: string, client: Client, firm: Firm): Promise<void> {
+  try {
+    await emailAdapter().send({
+      to: client.email,
+      brand: firm.name,
+      subject: `${firm.name}: your sign-in code`,
+      text: `Your sign-in code is: ${code}\n\nIt is valid for 10 minutes and can only be used once.\n\nIf you did not request this code, you can ignore this message.`,
+    });
+  } catch (e) {
+    console.error("OTP code delivery failed:", e instanceof Error ? e.message : e);
+  }
 }
 
 /**
@@ -173,23 +177,36 @@ export async function redeemOtpCode(emailAddress: string, inputCode: string): Pr
 
   if (!result.ok) {
     if (result.countFail) {
-      // Retire the code on the 5th wrong try; always increment its attempt counter
-      await db.signInCode.update({
-        where: { id: signInCode.id },
-        data: { attempts: { increment: 1 }, ...(result.cancel ? { usedAt: new Date() } : {}) },
+      // Atomically increment — only while the code is still unused and below the limit.
+      const { count } = await db.signInCode.updateMany({
+        where: { id: signInCode.id, usedAt: null, attempts: { lt: OTP_MAX_ATTEMPTS } },
+        data: { attempts: { increment: 1 } },
       });
-      // Shared lockout — same counter as wrong passwords
-      const fails = client.failedLogins + 1;
-      await db.client.update({
-        where: { id: client.id },
-        data: fails >= MAX_FAILS ? { failedLogins: 0, lockedUntil: new Date(Date.now() + LOCK) } : { failedLogins: fails },
-      });
+      if (count > 0) {
+        // 5th wrong try: retire the code so it cannot be tried again.
+        if (result.cancel) {
+          await db.signInCode.updateMany({ where: { id: signInCode.id, usedAt: null }, data: { usedAt: new Date() } });
+        }
+        // Shared lockout — same counter as wrong passwords.
+        const fails = client.failedLogins + 1;
+        await db.client.update({
+          where: { id: client.id },
+          data: fails >= MAX_FAILS ? { failedLogins: 0, lockedUntil: new Date(Date.now() + LOCK) } : { failedLogins: fails },
+        });
+      }
     }
     return { ok: false, message: result.message, client };
   }
 
-  // Success: retire the code and clear the shared lockout counter
-  await db.signInCode.update({ where: { id: signInCode.id }, data: { usedAt: new Date() } });
+  // Atomically retire the code — only sign in if exactly one row was updated.
+  // A concurrent request that already used the same code will see count=0.
+  const now = new Date();
+  const { count } = await db.signInCode.updateMany({
+    where: { id: signInCode.id, usedAt: null, expiresAt: { gt: now } },
+    data: { usedAt: now },
+  });
+  if (count !== 1) return { ...wrong, client };
+
   if (client.failedLogins) {
     await db.client.update({ where: { id: client.id }, data: { failedLogins: 0, lockedUntil: null } });
   }

@@ -6,8 +6,9 @@ import { redeemOtpCode } from "@/lib/accounts";
 
 export const POST = handler(async (req) => {
   await limit("otpVerify"); // per IP
-  const { email, code } = await body<{ email: string; code: string }>(req);
+  const { email, code, remember: rememberVal } = await body<{ email: string; code: string; remember?: unknown }>(req);
   if (!email || !code) return fail("Please enter your email and the code.");
+  const remember = rememberVal === "on" || rememberVal === true || rememberVal === "true";
 
   const r = await redeemOtpCode(String(email), String(code));
   if (!r.ok) {
@@ -15,7 +16,7 @@ export const POST = handler(async (req) => {
     return fail(r.message, 401);
   }
 
-  await startSession("client", { clientId: r.client.id });
+  await startSession("client", { clientId: r.client.id }, "FULL", { remember });
   await audit({ firmId: r.client.firmId, actorType: "CLIENT", actorId: r.client.id, action: "client.otp.verify" });
   return json({ ok: true });
 });

@@ -398,6 +398,79 @@ test.describe.serial("main journeys", () => {
     await expect(client.getByRole("heading", { name: /Hello/ })).toBeVisible();
   });
 
+  test("8b. two simultaneous OTP verifications produce exactly one session", async ({ playwright }) => {
+    // Count OTP emails already on disk for this client so we can wait for a fresh one.
+    const countBefore = existsSync(E2E.EMAIL_FILE_DIR)
+      ? readdirSync(E2E.EMAIL_FILE_DIR)
+          .sort()
+          .map((f) => JSON.parse(readFileSync(path.join(E2E.EMAIL_FILE_DIR, f), "utf8")) as Mail)
+          .filter((m) => m.to === clientEmail && /sign-in code/.test(m.subject)).length
+      : 0;
+
+    // Request a fresh code (the client may still be signed in from test 8 — that is fine).
+    const reqCtx = await playwright.request.newContext({ baseURL: E2E.APP_URL, extraHTTPHeaders: { Origin: E2E.APP_URL } });
+    await reqCtx.post("/api/auth/client/otp/request", { data: { email: clientEmail } });
+    await reqCtx.dispose();
+
+    // Wait for a NEW email (one more than before, because code is sent in the background).
+    let code8b = "";
+    for (let i = 0; i < 40; i++) {
+      if (existsSync(E2E.EMAIL_FILE_DIR)) {
+        const mails = readdirSync(E2E.EMAIL_FILE_DIR)
+          .sort()
+          .map((f) => JSON.parse(readFileSync(path.join(E2E.EMAIL_FILE_DIR, f), "utf8")) as Mail)
+          .filter((m) => m.to === clientEmail && /sign-in code/.test(m.subject));
+        if (mails.length > countBefore) {
+          const m = /\b(\d{6})\b/.exec(mails.at(-1)!.text);
+          if (m) { code8b = m[1]; break; }
+        }
+      }
+      await new Promise((r) => setTimeout(r, 250));
+    }
+    expect(code8b, "fresh OTP email must arrive").not.toBe("");
+
+    // Two concurrent verify requests for the same code — exactly one should succeed.
+    const [ctx1, ctx2] = await Promise.all([
+      playwright.request.newContext({ baseURL: E2E.APP_URL, extraHTTPHeaders: { Origin: E2E.APP_URL } }),
+      playwright.request.newContext({ baseURL: E2E.APP_URL, extraHTTPHeaders: { Origin: E2E.APP_URL } }),
+    ]);
+    const [r1, r2] = await Promise.all([
+      ctx1.post("/api/auth/client/otp/verify", { data: { email: clientEmail, code: code8b } }),
+      ctx2.post("/api/auth/client/otp/verify", { data: { email: clientEmail, code: code8b } }),
+    ]);
+
+    const statuses = [r1.status(), r2.status()].sort((a, b) => a - b);
+    expect(statuses, "exactly one verify succeeds, one fails").toEqual([200, 401]);
+
+    await ctx1.dispose();
+    await ctx2.dispose();
+  });
+
+  test("9a. remember=true (checkbox ticked) gives a 30-day persistent cookie", async ({ playwright }) => {
+    const ctx = await playwright.request.newContext({ baseURL: E2E.APP_URL, extraHTTPHeaders: { Origin: E2E.APP_URL } });
+    // "on" is what a ticked HTML checkbox sends via FormData
+    const r = await ctx.post("/api/auth/client/login", {
+      data: { email: clientEmail, password: "e2e-client-pass-123", remember: "on" },
+    });
+    expect(r.status()).toBe(200);
+    const setCookie = r.headers()["set-cookie"] ?? "";
+    expect(setCookie.toLowerCase(), "persistent cookie must have Expires").toMatch(/expires=/);
+    await ctx.dispose();
+  });
+
+  test("9b. remember=false (checkbox unticked) gives a session cookie with no Expires", async ({ playwright }) => {
+    const ctx = await playwright.request.newContext({ baseURL: E2E.APP_URL, extraHTTPHeaders: { Origin: E2E.APP_URL } });
+    // Unticked checkbox → key absent from FormData → not sent
+    const r = await ctx.post("/api/auth/client/login", {
+      data: { email: clientEmail, password: "e2e-client-pass-123" },
+    });
+    expect(r.status()).toBe(200);
+    const setCookie = r.headers()["set-cookie"] ?? "";
+    expect(setCookie.toLowerCase(), "session cookie must not have Expires").not.toMatch(/expires=/);
+    expect(setCookie.toLowerCase(), "session cookie must not have Max-Age").not.toMatch(/max-age=/);
+    await ctx.dispose();
+  });
+
   test("6. close and reopen a case; admin deletes a client (documents kept)", async ({ playwright }) => {
     staff.on("dialog", (d) => d.accept());
 
