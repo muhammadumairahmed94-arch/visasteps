@@ -82,8 +82,6 @@ export const TEXT: Record<string, string> = {
   "admin.item.remove": "Checklist item removed",
   "checklist.assignedTo.CLIENT": "Checklist item set to uploaded by client",
   "checklist.assignedTo.SPONSOR": "Checklist item set to uploaded by partner",
-  // AI analysis (staff portal only)
-  "ai.analyse": "AI document analysis run",
 };
 
 /** Recent audit entries for one client, in plain words, newest first. Scoped to the caller's firm. */
