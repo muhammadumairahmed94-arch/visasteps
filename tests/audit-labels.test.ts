@@ -27,6 +27,7 @@ const TEMPLATES: Record<string, string[]> = {
   "document.reassign.${}": ["CLIENT", "SPONSOR"],
   "admin.user.${}": Object.keys(USER_ACTIONS),
   "staff.case.stageChange.${}": STAGES.map((s) => s.key),
+  "checklist.assignedTo.${}": ["CLIENT", "SPONSOR"],
 };
 
 function files(dir: string): string[] {

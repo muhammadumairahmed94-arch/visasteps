@@ -157,7 +157,7 @@ export async function sendDueReminders(now = new Date()): Promise<{ missing: num
     else byRecipient.set(recipientKey, { docs: [d], toEmail, firmId: d.client.firmId, brand: d.client.firm.name, isSponsor });
   }
   for (const { docs, toEmail, firmId, brand, isSponsor } of byRecipient.values()) {
-    const lines = docs.map((d) => `• ${d.checklistItem.title}${d.note ? ` — note: ${d.note}` : ""}`).join("\n");
+    const lines = docs.map((d) => `• ${d.checklistItem.title}`).join("\n");
     const sent = await sendSafely({
       to: toEmail,
       brand,

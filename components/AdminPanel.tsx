@@ -280,7 +280,7 @@ function ItemRow({ item, first, last, run }: { item: Item; first: boolean; last:
         onSubmit={async (e) => {
           e.preventDefault();
           const f = form(e);
-          if (await act({ title: f.title, why: f.why, howToGet: f.howToGet, exampleImage: f.exampleImage, dateWindow: f.dateWindow, required: f.required === "on" })) setEditing(false);
+          if (await act({ title: f.title, why: f.why, howToGet: f.howToGet, exampleImage: f.exampleImage, dateWindow: f.dateWindow, required: f.required === "on", assignedTo: f.assignedTo as "CLIENT" | "SPONSOR" })) setEditing(false);
         }}
       >
         <div className="field">
@@ -304,6 +304,13 @@ function ItemRow({ item, first, last, run }: { item: Item; first: boolean; last:
         <div className="field">
           <label htmlFor={`hg-${item.id}`}>How to get this (optional)</label>
           <textarea id={`hg-${item.id}`} name="howToGet" rows={3} defaultValue={item.howToGet} placeholder="Plain-English steps, e.g. how to download statements from a banking app." />
+        </div>
+        <div className="field">
+          <label htmlFor={`at-${item.id}`}>Who uploads this</label>
+          <select id={`at-${item.id}`} name="assignedTo" className="input" defaultValue={item.assignedTo}>
+            <option value="CLIENT">Client</option>
+            <option value="SPONSOR">Partner or sponsor</option>
+          </select>
         </div>
         <label className="check">
           <input type="checkbox" name="required" defaultChecked={item.required} /> Required (unticked = optional)

@@ -5,6 +5,7 @@ import { audit } from "./audit";
 import { sendStaffLink } from "./accounts";
 import { getConnection } from "./onedrive-connection";
 import { UserError } from "./errors";
+import { resetRedoForDocs } from "./sponsor-ops";
 
 /** Everything the admin screen shows. Scoped to the admin's firm. */
 export async function adminView(admin: User) {
@@ -42,7 +43,7 @@ export async function adminView(admin: User) {
       name: r.name,
       clients: r._count.clients,
       folders: [...new Set(r.items.map((i) => i.folder))].sort(),
-      items: r.items.map((i) => ({ id: i.id, folder: i.folder, groupLabel: i.groupLabel, title: i.title, why: i.why, howToGet: i.howToGet ?? "", exampleImage: i.exampleImage ?? "", dateWindow: i.dateWindow ?? "", typeKey: i.typeKey, required: i.required })),
+      items: r.items.map((i) => ({ id: i.id, folder: i.folder, groupLabel: i.groupLabel, title: i.title, why: i.why, howToGet: i.howToGet ?? "", exampleImage: i.exampleImage ?? "", dateWindow: i.dateWindow ?? "", typeKey: i.typeKey, required: i.required, assignedTo: i.assignedTo })),
     })),
   };
 }
@@ -230,6 +231,7 @@ const ItemChange = z.object({
   exampleImage: z.string().trim().max(120).optional(),
   dateWindow: z.string().trim().max(40).optional(),
   required: z.boolean().optional(),
+  assignedTo: z.enum(["CLIENT", "SPONSOR"]).optional(),
   move: z.enum(["up", "down"]).optional(),
   remove: z.boolean().optional(),
 });
@@ -240,6 +242,7 @@ export async function changeItem(admin: User, itemId: string, input: unknown) {
   const item = await db.checklistItem.findFirst({ where: { id: itemId, route: { firmId: admin.firmId } } });
   if (!item) throw new UserError("Not found.");
 
+  let assignedToChanged = false;
   if (v.data.remove) {
     // Kept for clients who already sent it; disappears for everyone else
     await db.checklistItem.update({ where: { id: item.id }, data: { archivedAt: new Date() } });
@@ -253,6 +256,7 @@ export async function changeItem(admin: User, itemId: string, input: unknown) {
       await db.$transaction(reordered.map((s, k) => db.checklistItem.update({ where: { id: s.id }, data: { order: k } })));
     }
   } else {
+    assignedToChanged = v.data.assignedTo !== undefined && v.data.assignedTo !== item.assignedTo;
     await db.checklistItem.update({
       where: { id: item.id },
       data: {
@@ -262,8 +266,28 @@ export async function changeItem(admin: User, itemId: string, input: unknown) {
         exampleImage: v.data.exampleImage !== undefined ? (v.data.exampleImage || null) : undefined,
         dateWindow: v.data.dateWindow !== undefined ? (v.data.dateWindow || null) : undefined,
         required: v.data.required,
+        assignedTo: v.data.assignedTo,
       },
     });
+    if (assignedToChanged) {
+      const affectedDocs = await db.clientDocument.findMany({
+        where: {
+          checklistItemId: item.id,
+          assignedToOverride: null,
+          client: { sponsorAccounts: { some: { closedAt: null } } },
+        },
+        select: { id: true, status: true, missingAt: true },
+      });
+      const redoIds = affectedDocs.filter((d) => d.status === "REDO").map((d) => d.id);
+      if (redoIds.length) await resetRedoForDocs(redoIds);
+      const missingIds = affectedDocs.filter((d) => d.missingAt !== null).map((d) => d.id);
+      if (missingIds.length) {
+        await db.clientDocument.updateMany({
+          where: { id: { in: missingIds } },
+          data: { missingReason: null, missingAt: null, missingResponse: null },
+        });
+      }
+    }
   }
-  await audit({ firmId: admin.firmId, actorType: "USER", actorId: admin.id, action: v.data.remove ? "admin.item.remove" : "admin.item.edit", targetId: item.id });
+  await audit({ firmId: admin.firmId, actorType: "USER", actorId: admin.id, action: v.data.remove ? "admin.item.remove" : (assignedToChanged ? `checklist.assignedTo.${v.data.assignedTo!}` : "admin.item.edit"), targetId: item.id });
 }

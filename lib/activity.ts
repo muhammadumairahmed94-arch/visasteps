@@ -80,6 +80,8 @@ export const TEXT: Record<string, string> = {
   "admin.item.add": "Checklist item added",
   "admin.item.edit": "Checklist item edited",
   "admin.item.remove": "Checklist item removed",
+  "checklist.assignedTo.CLIENT": "Checklist item set to uploaded by client",
+  "checklist.assignedTo.SPONSOR": "Checklist item set to uploaded by partner",
 };
 
 /** Recent audit entries for one client, in plain words, newest first. Scoped to the caller's firm. */
