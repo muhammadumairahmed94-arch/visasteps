@@ -188,7 +188,8 @@ function Firm({ data, run }: { data: AdminView; run: Run }) {
         onSubmit={async (e) => {
           e.preventDefault();
           setBusy(true);
-          await run("/api/admin/firm", form(e));
+          const f = form(e);
+          await run("/api/admin/firm", { ...f, aiEnabled: f.aiEnabled === "on" });
           setBusy(false);
         }}
       >
@@ -210,6 +211,11 @@ function Firm({ data, run }: { data: AdminView; run: Run }) {
           <input id="f-days" name="reviewDays" type="number" className="input" min="1" max="30" defaultValue={data.firm.reviewDays} required aria-describedby="f-days-hint" />
           <p id="f-days-hint" className="hint">Clients see: &ldquo;Your caseworker usually checks documents within N working days.&rdquo;</p>
         </div>
+        {data.firm.aiProviderAvailable && (
+          <label className="check">
+            <input type="checkbox" name="aiEnabled" defaultChecked={data.firm.aiEnabled} /> AI document analysis (beta) — let caseworkers run an AI check on a document
+          </label>
+        )}
         <button className="big" disabled={busy}>{busy ? "Saving…" : "Save"}</button>
       </form>
       <section className="detail">

@@ -44,6 +44,7 @@ model Firm {
   oneDriveConfig Json?
   nextCaseNumber Int        @default(1000)
   reviewDays     Int        @default(2)
+  aiEnabled      Boolean    @default(false)
   createdAt      DateTime   @default(now())
   users          User[]
   clients        Client[]
