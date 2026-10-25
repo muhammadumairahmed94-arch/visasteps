@@ -12,6 +12,8 @@ export const LIMITS = {
   link: { max: 30, window: 15 * MIN },          // opening / using emailed links, per IP
   staffLogin: { max: 30, window: 15 * MIN },    // per IP (an office may share one); each account also locks after 10 misses
   upload: { max: 60, window: 60 * MIN },        // per client
+  uploadStart: { max: 20, window: 60 * MIN },   // per client: start a chunked upload session
+  uploadChunk: { max: 300, window: 10 * MIN },  // per client: send a chunk
   reportMissing: { max: 10, window: 60 * MIN }, // per client
   createClient: { max: 50, window: 60 * MIN },  // per caseworker
   otpRequest:      { max: 5,  window: 60 * MIN },   // per IP: requesting an OTP code

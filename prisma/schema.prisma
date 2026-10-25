@@ -286,3 +286,21 @@ model StorageJob {
 
   @@index([nextAttemptAt])
 }
+
+/**
+ * Temporary state for a chunked upload in progress.
+ * One session = one client + one document slot. Expires 24 hours after creation.
+ * Chunks are stored encrypted on disk (upload-queue/upload-chunks/{id}/…) and
+ * deleted when the upload completes, is cancelled, or expires.
+ */
+model UploadSession {
+  id        String   @id @default(cuid())
+  clientId  String
+  docId     String
+  pages     Json     // PageMeta[]: { fileName, sizeBytes, sha256, totalChunks }[]
+  multiPage Boolean  @default(false)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([clientId])
+}

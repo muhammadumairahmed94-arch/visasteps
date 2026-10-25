@@ -1,6 +1,14 @@
 import { fileTypeFromBuffer } from "file-type";
 import { PDFDocument } from "pdf-lib";
 
+export type GuideShape = "id-card" | "a4";
+
+/** Returns the camera guide shape for a checklist item. */
+export function guideShape(typeKey: string): GuideShape {
+  const lower = typeKey.toLowerCase();
+  return lower.includes("passport") || lower.includes("visa") ? "id-card" : "a4";
+}
+
 export const MAX_BYTES = 20 * 1024 * 1024;
 
 export type Kind = "pdf" | "jpg" | "png" | "heic";
@@ -21,6 +29,17 @@ export async function detectKind(data: Buffer): Promise<Kind | null> {
     default:
       return null;
   }
+}
+
+/** Merges an array of single-page PDFs (already processed by toPdf) into one multi-page PDF. */
+export async function mergePdf(pageBuffers: Buffer[]): Promise<Buffer> {
+  const merged = await PDFDocument.create();
+  for (const buf of pageBuffers) {
+    const src = await PDFDocument.load(new Uint8Array(buf));
+    const copied = await merged.copyPages(src, src.getPageIndices());
+    for (const page of copied) merged.addPage(page);
+  }
+  return Buffer.from(await merged.save());
 }
 
 /** Wraps a photo (JPG, PNG or iPhone HEIC) in a single-page PDF sized to the image. PDFs pass through. */

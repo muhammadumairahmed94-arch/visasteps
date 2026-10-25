@@ -10,7 +10,7 @@ import { audit } from "./audit";
 import { groupItems } from "./cases";
 import { appUrl } from "./accounts";
 import { reminderSummary } from "./reminders";
-import { MAX_BYTES, detectKind, toPdf } from "./files";
+import { MAX_BYTES, detectKind, mergePdf, toPdf } from "./files";
 import { scan, scanningEnabled } from "./virus";
 import { notifyOps } from "./alerts";
 import { caseFolder, storedFileName, ukDate } from "./naming";
@@ -51,6 +51,7 @@ export async function clientPortalView(clientId: string) {
       label: g.label,
       docs: g.items.map((i) => ({
         id: i.doc.id,
+        typeKey: i.typeKey,
         title: i.title,
         why: i.why,
         dates: i.dateWindow ? resolveDateWindow(i.dateWindow, anchor) : null,
@@ -141,7 +142,14 @@ export type StaffCaseView = NonNullable<Awaited<ReturnType<typeof staffCaseView>
 
 /* ---------- client upload ---------- */
 
-export async function uploadDocument(clientId: string, docId: string, files: File[]) {
+export type FileInput = { name: string; data: Buffer };
+
+export async function uploadDocument(
+  clientId: string,
+  docId: string,
+  files: FileInput[],
+  options?: { multiPage?: boolean },
+) {
   const doc = await db.clientDocument.findFirst({
     where: { id: docId, clientId },
     include: { checklistItem: true, files: current, client: { include: { caseworker: true, firm: true } } },
@@ -152,16 +160,15 @@ export async function uploadDocument(clientId: string, docId: string, files: Fil
   if (!files.length) throw new UserError("Please choose a file to send.");
 
   // Check every file before saving any of them
-  const checked = [];
+  const checked: { name: string; data: Buffer; kind: Awaited<ReturnType<typeof detectKind>> & {} }[] = [];
   for (const f of files) {
-    if (f.size > MAX_BYTES) throw new UserError("This file is too big. Please send a file under 20 MB.");
-    const data = Buffer.from(await f.arrayBuffer());
-    const kind = await detectKind(data);
+    if (f.data.length > MAX_BYTES) throw new UserError("This file is too big. Please send a file under 20 MB.");
+    const kind = await detectKind(f.data);
     if (!kind) throw new UserError("We cannot open this file. Please send a photo or a PDF.");
     if (scanningEnabled()) {
       let result;
       try {
-        result = await scan(data);
+        result = await scan(f.data);
       } catch (e) {
         console.error(e instanceof Error ? e.message : e);
         void notifyOps("scanner", "virus scanner unavailable — uploads are being refused", `Client uploads are refused until the virus scanner answers again (${e instanceof Error ? e.message : e}).\nOn the server: docker compose ps clamav ; docker compose restart clamav`);
@@ -173,7 +180,7 @@ export async function uploadDocument(clientId: string, docId: string, files: Fil
         throw new UserError("This file could not be accepted. Please upload a different copy of the document.");
       }
     }
-    checked.push({ name: f.name || "file", data, kind });
+    checked.push({ name: f.name || "file", data: f.data, kind });
   }
 
   const { client, checklistItem: item } = doc;
@@ -188,21 +195,41 @@ export async function uploadDocument(clientId: string, docId: string, files: Fil
 
   // Saved straight to OneDrive / SharePoint; if Microsoft is unreachable, queued and retried (lib/storage-queue.ts)
   const date = ukDate();
-  for (const f of checked) {
-    const out = await toPdf(f.data, f.kind);
+
+  if (options?.multiPage && checked.length > 1) {
+    // Merge all pages into one PDF, then create a single FileUpload record
+    const pdfPages = await Promise.all(checked.map((f) => toPdf(f.data, f.kind).then((r) => r.data)));
+    const merged = await mergePdf(pdfPages);
     const upload = await db.fileUpload.create({
       data: {
         clientDocumentId: doc.id,
-        originalName: f.name.slice(0, 200),
-        storedName: storedFileName(client.lastName!, item.typeKey, ++n, date, out.ext),
+        originalName: `scan-${checked.length}-pages.pdf`,
+        storedName: storedFileName(client.lastName!, item.typeKey, ++n, date, "pdf"),
         folderPath,
         storageStatus: "PENDING",
-        sizeBytes: out.data.length,
-        sha256: sha256(out.data),
+        sizeBytes: merged.length,
+        sha256: sha256(merged),
       },
     });
-    await storeUpload(upload, out.data);
+    await storeUpload(upload, merged);
     await audit({ firmId: client.firmId, actorType: "CLIENT", actorId: client.id, action: "document.upload", targetId: upload.id });
+  } else {
+    for (const f of checked) {
+      const out = await toPdf(f.data, f.kind);
+      const upload = await db.fileUpload.create({
+        data: {
+          clientDocumentId: doc.id,
+          originalName: f.name.slice(0, 200),
+          storedName: storedFileName(client.lastName!, item.typeKey, ++n, date, out.ext),
+          folderPath,
+          storageStatus: "PENDING",
+          sizeBytes: out.data.length,
+          sha256: sha256(out.data),
+        },
+      });
+      await storeUpload(upload, out.data);
+      await audit({ firmId: client.firmId, actorType: "CLIENT", actorId: client.id, action: "document.upload", targetId: upload.id });
+    }
   }
 
   await db.clientDocument.update({ where: { id: doc.id }, data: { status: "SENT", note: null, redoSince: null, redoRemindedAt: null, missingReason: null, missingAt: null, missingResponse: null } });

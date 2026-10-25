@@ -1,16 +1,16 @@
 "use client";
 
-import { useCallback, useEffect, useState, type ChangeEvent } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { ClientPortalView } from "@/lib/documents";
+import { guideShape } from "@/lib/files";
 import { STAGES, findNextDoc } from "@/lib/case-stage";
 import ClientSignIn from "./ClientSignIn";
+import ScanFlow from "./ScanFlow";
 import { CLIENT_LABEL, Page, Row, Tabs, api, useHashView, useToast, type Status } from "./ui";
 
 type Tab = "docs" | "visa" | "me" | "help";
 type View = { tab: Tab; group?: string; doc?: string; sub?: string };
 type Doc = ClientPortalView["groups"][number]["docs"][number] & { status: Status; dates: string | null; exampleImage: string | null; howToGet: string | null; missingAt: string | null; missingResponse: string | null };
-
-const MAX_BYTES = 20 * 1024 * 1024;
 const sent = (s: Status) => s === "SENT" || s === "OK";
 
 const parse = (h: string): View => {
@@ -267,26 +267,10 @@ function DocDetail({ doc, backLabel, reviewDays, onBack, onSent, onMissing }: {
   onSent: (msg: string) => void;
   onMissing: (msg: string) => void;
 }) {
-  const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [reportingMissing, setReportingMissing] = useState(false);
   const [missingReason, setMissingReason] = useState("");
   const [missingBusy, setMissingBusy] = useState(false);
-
-  async function onFiles(e: ChangeEvent<HTMLInputElement>) {
-    const files = [...(e.target.files ?? [])];
-    e.target.value = "";
-    if (!files.length) return;
-    if (files.some((f) => f.size > MAX_BYTES)) return setError("This file is too big. Please send a file under 20 MB.");
-    setBusy(true);
-    setError(null);
-    const form = new FormData();
-    files.forEach((f) => form.append("files", f));
-    const r = await api<{ message: string }>(`/api/client/documents/${doc.id}`, { method: "POST", body: form });
-    setBusy(false);
-    if (!r.ok) return setError(r.error);
-    onSent(r.data.message);
-  }
 
   async function submitMissing() {
     if (!missingReason.trim()) return setError("Please tell us why in a few words.");
@@ -342,20 +326,16 @@ function DocDetail({ doc, backLabel, reviewDays, onBack, onSent, onMissing }: {
             ))}
           </div>
         )}
-        {error && <p className="error" role="alert">{error}</p>}
         {doc.status === "OK" ? (
           <p className="done-tag">✓ Checked and approved</p>
         ) : (
           <>
-            <label className="big" htmlFor="up" aria-disabled={busy}>
-              {busy ? "Sending…" : doc.files.length && doc.status !== "REDO" ? "Send more" : "Take a photo or choose a file"}
-              <input type="file" id="up" accept="image/*,.pdf,.heic,.heif" multiple disabled={busy} onChange={onFiles} />
-            </label>
-            {busy && <p className="sr-only" role="status">Uploading</p>}
-            <p className="muted">Not sure if it&apos;s right? Upload it anyway and our team will check it.</p>
-            <p className="muted">
-              After you send a document, your caseworker usually checks it within {reviewDays} working {reviewDays === 1 ? "day" : "days"}.
-            </p>
+            <ScanFlow
+              docId={doc.id}
+              guideShape={guideShape(doc.typeKey)}
+              reviewDays={reviewDays}
+              onSent={onSent}
+            />
             {!doc.missingAt && !doc.missingResponse && !reportingMissing && (
               <button type="button" className="link" onClick={() => setReportingMissing(true)}>
                 I can&apos;t find this document
@@ -373,6 +353,7 @@ function DocDetail({ doc, backLabel, reviewDays, onBack, onSent, onMissing }: {
                   maxLength={500}
                   autoFocus
                 />
+                {error && <p className="error" role="alert">{error}</p>}
                 <div className="btns">
                   <button type="button" className="ghost" disabled={missingBusy} onClick={() => { setReportingMissing(false); setMissingReason(""); setError(null); }}>Cancel</button>
                   <button type="button" className="big" disabled={missingBusy} onClick={submitMissing}>{missingBusy ? "Sending…" : "Tell my caseworker"}</button>

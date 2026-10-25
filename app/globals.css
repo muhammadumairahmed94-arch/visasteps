@@ -176,3 +176,77 @@ button.row:hover { background: var(--teal-tint); }
   .logo { height: 28px; }
   .portal-label { letter-spacing: .12em; }
 }
+
+/* ---------- camera modal ---------- */
+.cam-modal {
+  position: fixed; inset: 0; background: #000; z-index: 200;
+  display: flex; flex-direction: column; overflow: hidden;
+}
+.cam-video { flex: 1; width: 100%; object-fit: cover; }
+.cam-overlay {
+  position: absolute; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  pointer-events: none;
+}
+.cam-guide {
+  position: relative;
+  box-shadow: 0 0 0 9999px rgba(0,0,0,0.48); /* dark vignette outside the guide */
+}
+.cam-corner {
+  position: absolute; width: 24px; height: 24px;
+  border-color: #fff; border-style: solid; border-width: 0;
+}
+.cam-tl { top: -2px; left: -2px; border-top-width: 3px; border-left-width: 3px; }
+.cam-tr { top: -2px; right: -2px; border-top-width: 3px; border-right-width: 3px; }
+.cam-bl { bottom: -2px; left: -2px; border-bottom-width: 3px; border-left-width: 3px; }
+.cam-br { bottom: -2px; right: -2px; border-bottom-width: 3px; border-right-width: 3px; }
+.cam-actions {
+  position: absolute; bottom: 0; left: 0; right: 0;
+  display: flex; gap: 12px; align-items: center;
+  padding: 20px max(20px, env(safe-area-inset-right, 0px)) calc(20px + env(safe-area-inset-bottom, 0px)) max(20px, env(safe-area-inset-left, 0px));
+  background: linear-gradient(to top, rgba(0,0,0,0.7), transparent);
+}
+.cam-actions .big { flex: 1; }
+.cam-cancel { flex: 0 0 auto; min-width: 88px; color: #fff; border-color: rgba(255,255,255,0.5); background: transparent; }
+.cam-cancel:hover { background: rgba(255,255,255,0.1); }
+.cam-err {
+  position: absolute; inset: 0; display: flex; flex-direction: column; gap: 16px;
+  align-items: center; justify-content: center; padding: 24px;
+  background: rgba(0,0,0,0.75); color: #fff;
+}
+
+/* ---------- scan flow ---------- */
+.scan-idle { display: flex; flex-direction: column; gap: 12px; }
+.scan-file-label { display: flex; align-items: center; justify-content: center; }
+.scan-file-label input[type=file] { position: absolute; width: 1px; height: 1px; opacity: 0; }
+.scan-file-label--disabled { opacity: .6; pointer-events: none; }
+.scan-review { display: flex; flex-direction: column; gap: 14px; }
+.scan-thumbs {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(90px, 1fr));
+  gap: 10px;
+}
+.scan-thumb { position: relative; aspect-ratio: 3/4; background: var(--page); border: 1px solid var(--rule); overflow: hidden; }
+.scan-thumb-img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.scan-badge {
+  position: absolute; bottom: 0; left: 0; right: 0;
+  background: rgba(138,28,28,0.85); color: #fff;
+  font-size: .72rem; padding: 3px 6px; text-align: center; line-height: 1.3;
+}
+.scan-thumb-btns {
+  position: absolute; top: 4px; right: 4px;
+  display: flex; flex-direction: column; gap: 3px;
+}
+.scan-btn {
+  width: 26px; height: 26px; border-radius: 50%;
+  background: rgba(0,0,0,0.55); color: #fff; border: 0;
+  font-size: .8rem; display: flex; align-items: center; justify-content: center;
+  min-height: 0;
+}
+.scan-btn-remove { background: rgba(138,28,28,0.75); }
+.scan-add { display: flex; gap: 10px; flex-wrap: wrap; }
+.scan-add .ghost, .scan-add .scan-file-label { flex: 1; min-width: 120px; }
+.scan-warning { border-left: 3px solid var(--alert); background: #fbf3f3; padding: 12px 14px; display: flex; flex-direction: column; gap: 12px; }
+.scan-sending { display: flex; flex-direction: column; gap: 14px; }
+.scan-progress { height: 8px; background: var(--rule); border-radius: 4px; overflow: hidden; }
+.scan-progress-fill { height: 100%; background: var(--teal); transition: width .25s ease; }

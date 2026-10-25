@@ -14,6 +14,26 @@ import { E2E } from "./env";
 const fixture = (name: string) => path.join(__dirname, "..", "tests", "fixtures", name);
 const clientEmail = `e2e.client.${Date.now()}@example.com`;
 
+// 1×1 transparent PNG — just small enough to trigger the "tiny" quality warning
+const TINY_PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=", "base64");
+
+type FileArg = string | string[] | { name: string; mimeType: string; buffer: Buffer };
+
+/**
+ * Select files via the ScanFlow picker, click Send, dismiss quality warnings if any appear.
+ * Does not wait for the success toast — caller checks the specific message.
+ */
+async function pickAndSend(page: Page, files: FileArg) {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  await page.locator("#scan-file").setInputFiles(files as any);
+  const count = Array.isArray(files) ? files.length : 1;
+  await page.getByRole("button", { name: new RegExp(`^Send ${count === 1 ? "1" : count} page`) }).click();
+  const warn = page.locator(".scan-warning");
+  if (await warn.isVisible({ timeout: 1000 }).catch(() => false)) {
+    await page.getByRole("button", { name: "Send anyway" }).click();
+  }
+}
+
 type Mail = { to: string; subject: string; text: string; action?: { label: string; url: string } };
 async function mailTo(to: string, subject: RegExp): Promise<Mail> {
   for (let i = 0; i < 40; i++) {
@@ -81,7 +101,7 @@ test.describe.serial("main journeys", () => {
     // Upload the passport
     await client.getByRole("button", { name: /^Identity/ }).click();
     await client.getByRole("button", { name: /^Passport/ }).click();
-    await client.locator("#up").setInputFiles(fixture("passport.png"));
+    await pickAndSend(client, fixture("passport.png"));
     await expect(client.getByText(/Received\. Your caseworker usually checks/)).toBeVisible();
     await expect(client.getByRole("button", { name: /^Passport.*Checking/ })).toBeVisible();
 
@@ -105,7 +125,7 @@ test.describe.serial("main journeys", () => {
     await client.goto("/");
     await client.getByRole("button", { name: /^English and TB test/ }).click();
     await client.getByRole("button", { name: /^English language evidence/ }).click();
-    await client.locator("#up").setInputFiles(fixture("certificate.png"));
+    await pickAndSend(client, fixture("certificate.png"));
     await expect(client.getByText(/Received\. Your caseworker usually checks/)).toBeVisible();
 
     // Caseworker asks for it again, with a note
@@ -127,7 +147,7 @@ test.describe.serial("main journeys", () => {
     await client.getByRole("button", { name: /^English language evidence.*Please redo/ }).click();
     await expect(client.getByText("Caseworker note:")).toBeVisible();
     await expect(client.getByText("The photo is blurred. Please upload a clearer copy.")).toBeVisible();
-    await client.locator("#up").setInputFiles(fixture("certificate.png"));
+    await pickAndSend(client, fixture("certificate.png"));
     await expect(client.getByText(/Received\. Your caseworker usually checks/)).toBeVisible();
 
     // Storage: new file in place, old one moved to "_Old versions" (never deleted)
@@ -150,9 +170,12 @@ test.describe.serial("main journeys", () => {
     expect(own.firstName).toBe("Amina");
     expect(JSON.stringify(own)).not.toContain(passport.id);
 
-    const upload = await amina.post(`/api/client/documents/${passport.id}`, { multipart: { files: { name: "x.png", mimeType: "image/png", buffer: readFileSync(fixture("passport.png")) } } });
+    // Amina cannot start an upload session for the other client's document
+    const upload = await amina.post("/api/client/upload/start", {
+      data: { docId: passport.id, multiPage: false, pages: [{ fileName: "x.png", sizeBytes: 100, sha256: "a".repeat(64), totalChunks: 1 }] },
+    });
     expect(upload.status()).toBe(400);
-    expect((await upload.json()).error).toMatch(/could not find this document/);
+    expect((await upload.json()).error).toMatch(/Document not found/);
 
     // Client sessions never open staff routes or files
     expect((await amina.get(`/api/staff/cases/${clientCaseId}`)).status()).toBe(401);
@@ -325,7 +348,7 @@ test.describe.serial("main journeys", () => {
     await client.goto("/");
     await client.getByRole("button", { name: /^Accommodation/ }).click();
     await client.getByRole("button", { name: /^Council tax bill/ }).click();
-    await client.locator("#up").setInputFiles(fixture("passport.png"));
+    await pickAndSend(client, fixture("passport.png"));
     await expect(client.getByText(/Your caseworker usually checks documents within 2 working days/)).toBeVisible();
   });
 
@@ -595,5 +618,80 @@ test.describe.serial("phone (375 px) — next step card and stage timeline", () 
     await expect(phone.getByText("Personal details")).toBeVisible();
     await expect(phone.getByText("Family details")).toHaveCount(0);
     await expect(phone.getByText("Client agreement")).toHaveCount(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Phone-sized chunked upload tests (375 × 667)
+// These use Amina's seeded account which has NEED documents throughout.
+// ---------------------------------------------------------------------------
+test.describe.serial("phone (375 px) — chunked upload", () => {
+  test.use({ viewport: { width: 375, height: 667 } });
+
+  let phone2: Page;
+
+  test.beforeAll(async ({ browser, playwright }) => {
+    // Sign in as Amina through the API and copy the session cookie to the browser context
+    const api = await playwright.request.newContext({ baseURL: E2E.APP_URL, extraHTTPHeaders: { Origin: E2E.APP_URL } });
+    await api.post("/api/auth/client/login", { data: { email: "amina.khan@example.com", password: E2E.SEED_CLIENT_PASSWORD } });
+    const cookies = (await api.storageState()).cookies;
+    await api.dispose();
+    const ctx = await browser.newContext({ viewport: { width: 375, height: 667 } });
+    await ctx.addCookies(cookies);
+    phone2 = await ctx.newPage();
+  });
+
+  test("11. multi-page upload: 2 files → thumbnails → Send 2 pages → Received", async () => {
+    await phone2.goto("/");
+    await phone2.getByRole("button", { name: /Send this document|Upload again/ }).first().click();
+    await expect(phone2.locator("#scan-file")).toBeVisible();
+
+    // Select two files at once
+    await phone2.locator("#scan-file").setInputFiles([fixture("passport.png"), fixture("certificate.png")]);
+    // Two thumbnails should appear
+    await expect(phone2.locator(".scan-thumb")).toHaveCount(2);
+    await phone2.getByRole("button", { name: /^Send 2 pages/ }).click();
+    // Dismiss quality warning if fixtures trigger it
+    const warn = phone2.locator(".scan-warning");
+    if (await warn.isVisible({ timeout: 1000 }).catch(() => false)) {
+      await phone2.getByRole("button", { name: "Send anyway" }).click();
+    }
+    await expect(phone2.getByText(/Received\. Your caseworker usually checks/)).toBeVisible({ timeout: 20000 });
+  });
+
+  test("12. quality warning badge shown for tiny image; Send anyway succeeds", async () => {
+    await phone2.goto("/");
+    await phone2.getByRole("button", { name: /Send this document/ }).first().click();
+    await expect(phone2.locator("#scan-file")).toBeVisible();
+
+    // Upload a 1×1 transparent PNG — guaranteed to trigger the "tiny" quality warning
+    await phone2.locator("#scan-file").setInputFiles({ name: "tiny.png", mimeType: "image/png", buffer: TINY_PNG });
+    // Quality badge should appear on the thumbnail
+    await expect(phone2.locator(".scan-badge")).toBeVisible();
+    expect(await phone2.locator(".scan-badge").textContent()).toMatch(/Very small/);
+
+    // Clicking Send shows the warning dialog; Send anyway completes
+    await phone2.getByRole("button", { name: /^Send 1 page/ }).click();
+    await expect(phone2.locator(".scan-warning")).toBeVisible();
+    await phone2.getByRole("button", { name: "Send anyway" }).click();
+    await expect(phone2.getByText(/Received\. Your caseworker usually checks/)).toBeVisible({ timeout: 20000 });
+  });
+
+  test("13. upload progress indicator appears and upload completes", async () => {
+    await phone2.goto("/");
+    await phone2.getByRole("button", { name: /Send this document/ }).first().click();
+    await expect(phone2.locator("#scan-file")).toBeVisible();
+
+    await phone2.locator("#scan-file").setInputFiles(fixture("certificate.png"));
+    await phone2.getByRole("button", { name: /^Send 1 page/ }).click();
+    // Dismiss quality warning if it fires
+    const warn = phone2.locator(".scan-warning");
+    if (await warn.isVisible({ timeout: 800 }).catch(() => false)) {
+      await phone2.getByRole("button", { name: "Send anyway" }).click();
+    }
+    // Progress indicator ("Sending…") should appear during the upload
+    await expect(phone2.getByRole("status")).toBeVisible({ timeout: 5000 });
+    // And resolve to the success toast
+    await expect(phone2.getByText(/Received\. Your caseworker usually checks/)).toBeVisible({ timeout: 20000 });
   });
 });
