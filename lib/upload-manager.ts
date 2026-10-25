@@ -1,6 +1,7 @@
 // Browser-only: do not import from server components or API routes.
 
-const CHUNK_SIZE = 512 * 1024; // 512 KB
+// Must match SERVER_CHUNK_SIZE in lib/upload-sessions.ts
+const CHUNK_SIZE = 1 * 1024 * 1024; // 1 MB
 
 async function sha256Hex(buf: ArrayBuffer): Promise<string> {
   const hash = await crypto.subtle.digest("SHA-256", buf);

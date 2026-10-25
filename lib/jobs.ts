@@ -1,5 +1,6 @@
 import { keepAlive, processQueue } from "./storage-queue";
 import { sendDueReminders } from "./reminders";
+import { purgeExpiredUploadSessions } from "./upload-sessions";
 import { backupAgeHours, backupsConfigured } from "./health";
 import { notifyOps } from "./alerts";
 
@@ -21,6 +22,7 @@ export function startBackgroundJobs() {
         g.lastReminders = Date.now();
         const r = await sendDueReminders();
         if (r.missing || r.redo) console.log(`Reminders sent: ${r.missing} missing-documents, ${r.redo} re-upload`);
+        await purgeExpiredUploadSessions();
         // Backups: alert if none has succeeded for 26 hours (the job runs nightly)
         if (backupsConfigured()) {
           const age = await backupAgeHours();

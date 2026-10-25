@@ -102,6 +102,7 @@ model Client {
   invites          Invite[]
   sessions         Session[]
   signInCodes      SignInCode[]
+  uploadSessions   UploadSession[]
 
   @@unique([firmId, caseRef])
 }
@@ -152,6 +153,7 @@ model ClientDocument {
   missingResponse String? // caseworker's reply, shown on the client portal
   updatedAt       DateTime      @updatedAt
   files           FileUpload[]
+  uploadSessions  UploadSession[]
 
   @@unique([clientId, checklistItemId])
 }
@@ -294,13 +296,16 @@ model StorageJob {
  * deleted when the upload completes, is cancelled, or expires.
  */
 model UploadSession {
-  id        String   @id @default(cuid())
-  clientId  String
-  docId     String
-  pages     Json     // PageMeta[]: { fileName, sizeBytes, sha256, totalChunks }[]
-  multiPage Boolean  @default(false)
-  expiresAt DateTime
-  createdAt DateTime @default(now())
+  id           String         @id @default(cuid())
+  clientId     String
+  client       Client         @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  docId        String
+  doc          ClientDocument @relation(fields: [docId], references: [id], onDelete: Cascade)
+  pages        Json           // PageMeta[]: { fileName, sizeBytes, sha256, totalChunks }[]
+  multiPage    Boolean        @default(false)
+  completingAt DateTime?      // set atomically when complete starts; prevents double-processing
+  expiresAt    DateTime
+  createdAt    DateTime       @default(now())
 
   @@index([clientId])
 }

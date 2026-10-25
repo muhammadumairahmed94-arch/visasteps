@@ -3,6 +3,7 @@ import { currentClient } from "@/lib/auth";
 import { fail, handler, json, body } from "@/lib/http";
 import { limit } from "@/lib/ratelimit";
 import { MAX_BYTES } from "@/lib/files";
+import { SERVER_CHUNK_SIZE, expectedChunkCount, sanitizeFileName } from "@/lib/upload-sessions";
 
 type PageSpec = { fileName: string; sizeBytes: number; sha256: string; totalChunks: number };
 
@@ -19,14 +20,18 @@ export const POST = handler(async (req) => {
   if (!Array.isArray(pages) || pages.length === 0) return fail("Please include at least one page.");
   if (pages.length > MAX_PAGES) return fail(`You can send up to ${MAX_PAGES} pages at a time.`);
 
-  for (const p of pages) {
-    if (typeof p.sizeBytes !== "number" || p.sizeBytes <= 0) return fail("Invalid page data.");
-    if (typeof p.totalChunks !== "number" || p.totalChunks < 1) return fail("Invalid chunk count.");
-    if (typeof p.sha256 !== "string" || !/^[0-9a-f]{64}$/.test(p.sha256)) return fail("Invalid checksum.");
-    if (typeof p.fileName !== "string") return fail("Invalid file name.");
+  const normalizedPages: PageSpec[] = [];
+  for (const [pi, p] of pages.entries()) {
+    if (typeof p.sizeBytes !== "number" || p.sizeBytes <= 0) return fail(`Page ${pi + 1} has invalid size.`);
+    if (typeof p.sha256 !== "string" || !/^[0-9a-f]{64}$/.test(p.sha256)) return fail(`Page ${pi + 1} has invalid checksum.`);
+    if (typeof p.fileName !== "string") return fail(`Page ${pi + 1} has invalid file name.`);
+    const wantChunks = expectedChunkCount(p.sizeBytes);
+    if (typeof p.totalChunks !== "number" || p.totalChunks !== wantChunks)
+      return fail(`Page ${pi + 1}: expected ${wantChunks} chunk${wantChunks === 1 ? "" : "s"} for ${p.sizeBytes} bytes (chunk size is ${SERVER_CHUNK_SIZE} bytes).`);
+    normalizedPages.push({ ...p, fileName: sanitizeFileName(p.fileName) });
   }
 
-  const totalBytes = pages.reduce((s, p) => s + p.sizeBytes, 0);
+  const totalBytes = normalizedPages.reduce((s, p) => s + p.sizeBytes, 0);
   if (totalBytes > MAX_BYTES) return fail("Total file size exceeds 20 MB.");
 
   const doc = await db.clientDocument.findFirst({
@@ -41,7 +46,7 @@ export const POST = handler(async (req) => {
     data: {
       clientId: client.id,
       docId,
-      pages: pages as unknown as object,
+      pages: normalizedPages as unknown as object,
       multiPage: !!multiPage,
       expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
     },
