@@ -1,3 +1,5 @@
+import { randomBytes } from "node:crypto";
+
 export interface AiSource {
   label: string;
   kind: "client-document" | "guidance";
@@ -30,11 +32,15 @@ const SYSTEM_PROMPT =
   "or illegible text — empty array if none). " +
   "Do not use any external tools or browse the web.";
 
-function sourcesBlock(sources: AiSource[]): string {
+/** Exported for unit tests — pass a fixed boundary to make assertions deterministic. */
+export function sourcesBlock(sources: AiSource[], boundary = randomBytes(8).toString("hex")): string {
+  const open = `source-${boundary}`;
+  const close = `/${open}`;
   return sources
     .map((s) => {
       const meta = [`label: ${s.label}`, `kind: ${s.kind}`, ...(s.fileId ? [`fileId: ${s.fileId}`] : []), ...(s.page !== undefined ? [`page: ${s.page}`] : [])].join(", ");
-      return `<source ${meta}>\n${s.text}\n</source>`;
+      const safeText = s.text.replaceAll(`<${close}>`, "");
+      return `<${open} ${meta}>\n${safeText}\n<${close}>`;
     })
     .join("\n\n");
 }
