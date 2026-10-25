@@ -1,11 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import type { ClientPortalView } from "@/lib/documents";
+import type { ClientPortalView, SponsorPortalView } from "@/lib/documents";
 import { guideShape } from "@/lib/files";
 import { STAGES, findNextDoc } from "@/lib/case-stage";
 import ClientSignIn from "./ClientSignIn";
 import ScanFlow from "./ScanFlow";
+import SponsorPortal from "./SponsorPortal";
 import MessageThread from "./MessageThread";
 import { CLIENT_LABEL, Page, Row, Tabs, api, useHashView, useToast, type Status } from "./ui";
 
@@ -26,6 +27,7 @@ export default function ClientPortal({ token: linkToken }: { token?: string }) {
   // The emailed link works once; forget it after use so signing out shows the normal sign-in
   const [token, setToken] = useState(linkToken);
   const [data, setData] = useState<ClientPortalView | null>(null);
+  const [sponsorData, setSponsorData] = useState<SponsorPortalView | null>(null);
   const [state, setState] = useState<"loading" | "signedOut" | "in">(token ? "signedOut" : "loading");
   const [unreadMessages, setUnreadMessages] = useState(0);
   const [view, go] = useHashView(parse, format);
@@ -33,10 +35,14 @@ export default function ClientPortal({ token: linkToken }: { token?: string }) {
 
   const load = useCallback(
     () =>
-      api<ClientPortalView>("/api/client/portal").then((r) => {
+      api<ClientPortalView | SponsorPortalView>("/api/client/portal").then((r) => {
         if (r.ok) {
-          setData(r.data);
-          setUnreadMessages(r.data.unreadMessages);
+          if (r.data.isSponsor) {
+            setSponsorData(r.data as SponsorPortalView);
+          } else {
+            setData(r.data as ClientPortalView);
+            setUnreadMessages((r.data as ClientPortalView).unreadMessages);
+          }
           setState("in");
         } else setState("signedOut");
       }),
@@ -46,6 +52,9 @@ export default function ClientPortal({ token: linkToken }: { token?: string }) {
   useEffect(() => {
     if (!linkToken) void load();
   }, [linkToken, load]);
+
+  if (state === "in" && sponsorData)
+    return <SponsorPortal token={undefined} />;
 
   if (state === "loading")
     return (

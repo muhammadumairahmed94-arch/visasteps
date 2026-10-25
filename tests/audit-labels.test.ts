@@ -24,6 +24,7 @@ const USER_ACTIONS = { disable: true, enable: true, reset2fa: true, sendLink: tr
 >;
 const TEMPLATES: Record<string, string[]> = {
   "document.${}": Object.keys(DOCUMENT_REVIEW),
+  "document.reassign.${}": ["CLIENT", "SPONSOR"],
   "admin.user.${}": Object.keys(USER_ACTIONS),
   "staff.case.stageChange.${}": STAGES.map((s) => s.key),
 };

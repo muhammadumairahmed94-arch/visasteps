@@ -50,17 +50,18 @@ Large volumes of identity documents (passports), financial records and some **sp
 | R7 | Keeping data longer than needed | Likely / Medium | [No automatic deletion yet. Decide retention period; add a "close case / delete" process] | **Open** |
 | R8 | Email mis-delivery or interception | Possible / Medium | Emails contain links, not documents; links single use and time-limited; reminders list document names only | Low |
 | R9 | Loss of data (deletion, ransomware) | Unlikely / High | Nightly encrypted backups (30 days, in OneDrive — same account as the documents, so keep an occasional offline copy), OneDrive version history, `_Old versions` never deleted, restore procedure documented | Low (once restore tested) |
-| R10 | Third-party data (partners/sponsors) without their knowledge | Likely / Medium | [Ask clients to share the privacy notice with partners/sponsors; consider a line on the account-creation page] | Medium — action needed |
+| R10 | Third-party data (partners/sponsors) without their knowledge | Likely / Medium | Partner/sponsor accounts: partner receives a direct invite email and is shown a privacy notice at account creation; acceptance is recorded in the audit log. Where a partner uploads documents that name a further third party (e.g. employer payslips), the client is advised to share the notice with that party. | Low |
 | R11 | Inline scripts allowed by the browser security policy | Unlikely / Medium | No user-written HTML rendered; React escaping; other headers strict | Low (accepted) |
 | R12 | Staff misuse | Unlikely / High | Role-based access; audit log of views, opens and changes, visible per client | Low |
 | R13 | Message content intercepted or read by wrong party | Possible / High | Messages encrypted at rest (AES-256-GCM, key not in the database); only the client, their assigned caseworker and the firm's admins can access the thread; email notifications contain no message text; rate-limited sends; messages deleted when the case is deleted | Low |
+| R14 | Partner/sponsor account isolation — partner sees too much, or main client sees partner uploads prematurely | Possible / Medium | Partners see only SPONSOR-assigned documents; main client only sees partner documents when a caseworker explicitly enables cross-party visibility (visibleToClient flag); uploaded files are filtered by uploaderKind in both portals; sponsor account is cascade-deleted when the main case is deleted | Low |
 
 ## 6. Actions before launch
 
 - [ ] Decide retention periods (R7) and how accounts/files are closed or deleted.
 - [ ] Decide on Microsoft 365 Personal vs Business (R6); if staying Personal, secure the Microsoft account with 2FA.
-- [ ] Approve and publish the privacy notice; link it in the portal.
-- [ ] Partner/sponsor information (R10).
+- [ ] Approve and publish the privacy notice (now includes partner/sponsor section); link it in the portal.
+- [x] Partner/sponsor information — R10 resolved by direct-invite design with in-portal privacy notice. R14 added and mitigated.
 - [ ] Confirm ICO registration and Article 9 condition.
 - [ ] Test a backup restore (R9).
 - [ ] Independent security test (see docs/security-review.md).

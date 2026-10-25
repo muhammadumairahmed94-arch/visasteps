@@ -7,6 +7,7 @@ import { sendMessage, listMessages, markRead } from "@/lib/messages";
 export const GET = handler(async () => {
   const client = await currentClient();
   if (!client) return fail("Please sign in again.", 401);
+  if (client.sponsorForClientId) return fail("Not available.", 403);
 
   const payload = await listMessages(client.id);
   await markRead(client.id, "CLIENT");
@@ -18,6 +19,7 @@ export const GET = handler(async () => {
 export const POST = handler(async (req) => {
   const client = await currentClient();
   if (!client) return fail("Please sign in again.", 401);
+  if (client.sponsorForClientId) return fail("Not available.", 403);
 
   await limit("messageClient", client.id);
 

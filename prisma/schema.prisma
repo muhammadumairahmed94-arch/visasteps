@@ -25,6 +25,7 @@ enum ActorType {
   CLIENT
   USER
   SYSTEM
+  SPONSOR
 }
 
 enum CaseStage {
@@ -99,6 +100,12 @@ model Client {
   failedLogins     Int              @default(0)
   lockedUntil      DateTime?
   createdAt        DateTime         @default(now())
+  // Sponsor sub-accounts — a sponsor is a Client row with sponsorForClientId set
+  sponsorForClientId String?
+  sponsorForClient   Client?        @relation("SponsorOf", fields: [sponsorForClientId], references: [id], onDelete: Cascade)
+  sponsorAccounts    Client[]       @relation("SponsorOf")
+  sponsorLabel       String?        // e.g. "Partner" — shown in portal header
+  visibleToClient    Boolean        @default(false) // sponsor docs shown read-only on main client portal
   documents        ClientDocument[]
   invites          Invite[]
   sessions         Session[]
@@ -137,6 +144,7 @@ model ChecklistItem {
   required     Boolean          @default(true)
   order        Int
   archivedAt   DateTime? // removed from the route; kept for clients who already sent it
+  assignedTo   String    @default("CLIENT") // "CLIENT" | "SPONSOR" — who uploads this by default
   documents    ClientDocument[]
 }
 
@@ -152,10 +160,12 @@ model ClientDocument {
   redoRemindedAt  DateTime?
   missingReason   String? // set by client via "I can't find this"
   missingAt       DateTime? // when missingReason was saved; null = not flagged
-  missingResponse String? // caseworker's reply, shown on the client portal
-  updatedAt       DateTime      @updatedAt
-  files           FileUpload[]
-  uploadSessions  UploadSession[]
+  missingResponse    String?  // caseworker's reply, shown on the client portal
+  assignedToOverride String?  // null = use route default; "CLIENT" | "SPONSOR" to override
+  filesShared        Boolean  @default(false) // show prior party's files to current assignee
+  updatedAt          DateTime @updatedAt
+  files              FileUpload[]
+  uploadSessions     UploadSession[]
 
   @@unique([clientId, checklistItemId])
 }
@@ -174,6 +184,7 @@ model FileUpload {
   sha256           String
   uploadedAt       DateTime       @default(now())
   supersededAt     DateTime?
+  uploaderKind     String         @default("CLIENT") // "CLIENT" | "SPONSOR"
   jobs             StorageJob[]
 }
 

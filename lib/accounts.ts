@@ -75,6 +75,25 @@ export async function sendSetupLink(client: Client, firm: Firm): Promise<boolean
   });
 }
 
+export async function sendSponsorInvite(
+  sponsorClient: Client,
+  parentClient: { firstName: string | null; lastName: string | null; email: string },
+  firm: Firm,
+): Promise<boolean> {
+  const link = await createLink(sponsorClient.id, "SETUP");
+  const name =
+    parentClient.firstName && parentClient.lastName
+      ? `${parentClient.firstName} ${parentClient.lastName}`
+      : parentClient.email;
+  return sendSafely({
+    to: sponsorClient.email,
+    brand: firm.name,
+    subject: `${firm.name}: invitation to upload your documents`,
+    text: `${firm.name} has asked you to upload some documents to help with ${name}'s UK visa application.\n\nThis link is valid for 7 days and can be used once.`,
+    action: { label: "Create account", url: link },
+  });
+}
+
 export async function sendResetLink(client: Client, firm: Firm): Promise<boolean> {
   const link = await createLink(client.id, "RESET");
   return sendSafely({

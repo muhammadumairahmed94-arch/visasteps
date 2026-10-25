@@ -17,7 +17,7 @@ const mocks = vi.hoisted(() => ({
     delete:     vi.fn(),
     deleteMany: vi.fn(),
   },
-  clientDocument: { findFirst: vi.fn() },
+  clientDocument: { findFirst: vi.fn(), findMany: vi.fn(), updateMany: vi.fn() },
   clientDb:  { findFirst: vi.fn(), update: vi.fn(), delete: vi.fn() },
   sessionDb: { deleteMany: vi.fn() },
   inviteDb:  { updateMany: vi.fn() },
@@ -246,10 +246,13 @@ describe("start route — wrong totalChunks rejected", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(currentClient).mockResolvedValue({ id: "c1" } as never);
+    vi.mocked(currentClient).mockResolvedValue({ id: "c1", sponsorForClientId: null } as never);
     vi.mocked(limit).mockResolvedValue(undefined);
     mocks.clientDocument.findFirst.mockResolvedValue({
-      id: "doc1", clientId: "c1", status: "NEED", client: { closedAt: null },
+      id: "doc1", clientId: "c1", status: "NEED",
+      assignedToOverride: null,
+      checklistItem: { assignedTo: "CLIENT" },
+      client: { closedAt: null, sponsorAccounts: [] },
     });
     mocks.uploadSession.create.mockResolvedValue({ id: "sess1" });
   });
@@ -293,7 +296,7 @@ describe("chunk route — oversized chunks rejected", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(currentClient).mockResolvedValue({ id: "c1" } as never);
+    vi.mocked(currentClient).mockResolvedValue({ id: "c1", sponsorForClientId: null } as never);
     vi.mocked(limit).mockResolvedValue(undefined);
     mocks.uploadSession.findUnique.mockResolvedValue(sessData);
   });
@@ -358,7 +361,7 @@ describe("complete route — double-tap protection", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(currentClient).mockResolvedValue({ id: "c1" } as never);
+    vi.mocked(currentClient).mockResolvedValue({ id: "c1", sponsorForClientId: null } as never);
   });
 
   it("returns 'Already received' when completingAt is already set", async () => {
@@ -423,6 +426,7 @@ describe("setCaseClosed — removes upload session chunks on close", () => {
     mocks.clientDb.update.mockResolvedValue({});
     mocks.sessionDb.deleteMany.mockResolvedValue({});
     mocks.inviteDb.updateMany.mockResolvedValue({});
+    mocks.clientDocument.findMany.mockResolvedValue([]);
     mocks.uploadSession.findMany.mockResolvedValue([{ id: "s1" }, { id: "s2" }]);
     mocks.uploadSession.deleteMany.mockResolvedValue({});
     mocks.auditLog.create.mockResolvedValue({});

@@ -1,6 +1,7 @@
 import type { DocStatus, User } from "@prisma/client";
 import { db } from "./db";
 import { UserError } from "./errors";
+import { resolvedOwner, visibleFiles } from "./sponsor";
 import { sha256 } from "./crypto";
 import { storage } from "./adapters/storage";
 import { moveToOldVersions, readQueued, storeUpload } from "./storage-queue";
@@ -36,46 +37,133 @@ export async function clientPortalView(clientId: string) {
       firm: true,
       route: true,
       documents: { include: { checklistItem: true, files: current } },
+      sponsorAccounts: { where: { closedAt: null }, select: { id: true, visibleToClient: true } },
     },
   });
   const unreadMessages = await db.message.count({
     where: { clientId, senderKind: "STAFF", readAt: null },
   });
   const anchor = c.plannedSubmissionDate ?? ukToday();
-  const docs = c.documents.filter(shown).map((d) => ({ ...d.checklistItem, doc: d }));
+  const sponsorActive = c.sponsorAccounts.length > 0;
+  const sponsorVisibleToClient = c.sponsorAccounts.some((s) => s.visibleToClient);
+
+  // Docs the client can interact with: those resolved to CLIENT, plus SPONSOR docs shown read-only
+  const visibleDocs = c.documents.filter(shown).filter((d) => {
+    const owner = resolvedOwner(d, sponsorActive);
+    if (owner === "CLIENT") return true;
+    // SPONSOR-assigned doc: show read-only if visibleToClient is enabled
+    return sponsorVisibleToClient;
+  });
+
+  const docs = visibleDocs.map((d) => ({ ...d.checklistItem, doc: d }));
+  const sponsorReadOnly = (d: (typeof visibleDocs)[number]) =>
+    resolvedOwner(d, sponsorActive) === "SPONSOR";
+
   return {
     firstName: c.firstName,
     route: c.route.name,
     caseStage: c.caseStage,
     unreadMessages,
+    isSponsor: false,
     firm: { name: c.firm.name, phone: c.firm.phone, whatsapp: c.firm.whatsapp, reviewDays: c.firm.reviewDays },
     details: { name: `${c.firstName} ${c.lastName}`, mobile: c.mobile, email: c.email },
     groups: groupItems(docs).map((g) => ({
       id: g.folder,
       label: g.label,
-      docs: g.items.map((i) => ({
-        id: i.doc.id,
-        typeKey: i.typeKey,
-        title: i.title,
-        why: i.why,
-        dates: i.dateWindow ? resolveDateWindow(i.dateWindow, anchor) : null,
-        exampleImage: i.exampleImage ?? null,
-        howToGet: i.howToGet ?? null,
-        required: i.required,
-        status: i.doc.status,
-        note: i.doc.status === "REDO" ? i.doc.note : null,
-        missingAt: i.doc.missingAt ? i.doc.missingAt.toISOString() : null,
-        missingResponse: i.doc.missingResponse ?? null,
-        files: i.doc.files.map((f) => ({ orig: f.originalName, date: ukDate(f.uploadedAt) })),
-      })),
+      docs: g.items.map((i) => {
+        const readOnly = sponsorReadOnly(i.doc);
+        const myFiles = visibleFiles(i.doc.files, "CLIENT", i.doc.filesShared);
+        return {
+          id: i.doc.id,
+          typeKey: i.typeKey,
+          title: i.title,
+          why: i.why,
+          dates: i.dateWindow ? resolveDateWindow(i.dateWindow, anchor) : null,
+          exampleImage: i.exampleImage ?? null,
+          howToGet: i.howToGet ?? null,
+          required: i.required,
+          status: i.doc.status,
+          // Never show the REDO note to the main client for a SPONSOR-assigned doc
+          note: i.doc.status === "REDO" && !readOnly ? i.doc.note : null,
+          missingAt: !readOnly && i.doc.missingAt ? i.doc.missingAt.toISOString() : null,
+          missingResponse: !readOnly ? (i.doc.missingResponse ?? null) : null,
+          readOnly,
+          files: myFiles.map((f) => ({ orig: f.originalName, date: ukDate(f.uploadedAt) })),
+        };
+      }),
+    })),
+  };
+}
+
+/** Portal view for a sponsor account. Reads the parent case's SPONSOR-assigned documents. */
+export async function sponsorPortalView(sponsorClientId: string) {
+  const sponsor = await db.client.findUniqueOrThrow({
+    where: { id: sponsorClientId },
+    include: {
+      sponsorForClient: {
+        include: {
+          firm: true,
+          route: true,
+          caseworker: true,
+          documents: { include: { checklistItem: true, files: current } },
+        },
+      },
+    },
+  });
+  if (!sponsor.sponsorForClient) throw new UserError("Account not found.");
+  const parent = sponsor.sponsorForClient;
+
+  const anchor = parent.plannedSubmissionDate ?? ukToday();
+  const sponsorDocs = parent.documents.filter(shown).filter((d) =>
+    resolvedOwner(d, true) === "SPONSOR",
+  );
+  const docs = sponsorDocs.map((d) => ({ ...d.checklistItem, doc: d }));
+
+  return {
+    firstName: sponsor.firstName,
+    sponsorLabel: sponsor.sponsorLabel ?? "Partner/Sponsor",
+    route: parent.route.name,
+    caseStage: null,
+    unreadMessages: 0,
+    isSponsor: true,
+    firm: { name: parent.firm.name, phone: parent.firm.phone, whatsapp: parent.firm.whatsapp, reviewDays: parent.firm.reviewDays },
+    details: { name: `${sponsor.firstName} ${sponsor.lastName}`, mobile: sponsor.mobile, email: sponsor.email },
+    groups: groupItems(docs).map((g) => ({
+      id: g.folder,
+      label: g.label,
+      docs: g.items.map((i) => {
+        const myFiles = visibleFiles(i.doc.files, "SPONSOR", i.doc.filesShared);
+        return {
+          id: i.doc.id,
+          typeKey: i.typeKey,
+          title: i.title,
+          why: i.why,
+          dates: i.dateWindow ? resolveDateWindow(i.dateWindow, anchor) : null,
+          exampleImage: i.exampleImage ?? null,
+          howToGet: i.howToGet ?? null,
+          required: i.required,
+          status: i.doc.status,
+          note: i.doc.status === "REDO" ? i.doc.note : null,
+          missingAt: i.doc.missingAt ? i.doc.missingAt.toISOString() : null,
+          missingResponse: i.doc.missingResponse ?? null,
+          readOnly: false,
+          files: myFiles.map((f) => ({ orig: f.originalName, date: ukDate(f.uploadedAt) })),
+        };
+      }),
     })),
   };
 }
 
 export type ClientPortalView = Awaited<ReturnType<typeof clientPortalView>>;
+export type SponsorPortalView = Awaited<ReturnType<typeof sponsorPortalView>>;
+export type PortalView = ClientPortalView | SponsorPortalView;
 
-/** Admins see every case in the firm; caseworkers see the cases assigned to them. */
-export const visibleCases = (u: User) => (u.role === "ADMIN" ? { firmId: u.firmId } : { firmId: u.firmId, caseworkerId: u.id });
+/** Admins see every case in the firm; caseworkers see the cases assigned to them.
+ *  sponsorForClientId: null ensures sponsor sub-accounts never surface as cases. */
+export const visibleCases = (u: User) =>
+  u.role === "ADMIN"
+    ? { firmId: u.firmId, sponsorForClientId: null }
+    : { firmId: u.firmId, caseworkerId: u.id, sponsorForClientId: null };
 
 export async function staffCaseList(u: User) {
   const clients = await db.client.findMany({
@@ -109,12 +197,19 @@ export async function staffCaseList(u: User) {
 export async function staffCaseView(u: User, clientId: string) {
   const c = await db.client.findFirst({
     where: { id: clientId, ...visibleCases(u) },
-    include: { route: true, caseworker: true, documents: { include: { checklistItem: true, files: current } } },
+    include: {
+      route: true,
+      caseworker: true,
+      documents: { include: { checklistItem: true, files: current } },
+      sponsorAccounts: { select: { id: true, email: true, sponsorLabel: true, closedAt: true, visibleToClient: true } },
+    },
   });
   if (!c) return null;
   const unreadMessages = await db.message.count({
     where: { clientId: c.id, senderKind: "CLIENT", readAt: null },
   });
+  const sponsorActive = c.sponsorAccounts.some((s) => !s.closedAt);
+  const activeSponsor = c.sponsorAccounts.find((s) => !s.closedAt) ?? null;
   const docs = c.documents.filter(shown).map((d) => ({ ...d.checklistItem, doc: d }));
   return {
     client: {
@@ -129,9 +224,12 @@ export async function staffCaseView(u: User, clientId: string) {
       closedAt: c.closedAt ? ukDate(c.closedAt) : null,
       plannedSubmissionDate: c.plannedSubmissionDate ? c.plannedSubmissionDate.toISOString().slice(0, 10) : null,
       caseStage: c.caseStage,
-      reminders: reminderSummary(c, c.documents.filter((d) => shown(d) && d.status === "NEED" && d.checklistItem.required).length),
+      reminders: reminderSummary(c, c.documents.filter((d) => shown(d) && d.status === "NEED" && d.checklistItem.required && resolvedOwner(d, sponsorActive) === "CLIENT").length),
       storageRoot: c.accountCreatedAt ? caseFolder(c).join(" / ") : null,
       unreadMessages,
+      sponsor: activeSponsor
+        ? { id: activeSponsor.id, label: activeSponsor.sponsorLabel ?? "", email: activeSponsor.email, visibleToClient: activeSponsor.visibleToClient }
+        : null,
     },
     groups: groupItems(docs).map((g) => ({
       id: g.folder,
@@ -144,6 +242,9 @@ export async function staffCaseView(u: User, clientId: string) {
         note: i.doc.note,
         missingReason: i.doc.missingReason ?? null,
         missingAt: i.doc.missingAt ? i.doc.missingAt.toISOString() : null,
+        assignedTo: resolvedOwner(i.doc, sponsorActive),
+        assignedToOverride: i.doc.assignedToOverride as "CLIENT" | "SPONSOR" | null,
+        filesShared: i.doc.filesShared,
         files: i.doc.files.map((f) => ({
           id: f.id,
           storedName: f.storedName,
@@ -159,24 +260,66 @@ export async function staffCaseView(u: User, clientId: string) {
 
 export type StaffCaseView = NonNullable<Awaited<ReturnType<typeof staffCaseView>>>;
 
-/* ---------- client upload ---------- */
+/* ---------- client / sponsor upload ---------- */
 
 export type FileInput = { name: string; data: Buffer };
 
+/**
+ * Resolve who is uploading (main client or sponsor) and return the document, the parent case client,
+ * and the uploaderKind to stamp on FileUpload rows.
+ * Throws UserError if the uploader is not authorised for this document.
+ */
+async function resolveUploadAuth(uploaderId: string, docId: string) {
+  const uploader = await db.client.findUnique({
+    where: { id: uploaderId },
+    select: { sponsorForClientId: true, closedAt: true },
+  });
+  if (!uploader) throw new UserError("We could not find this document. Please go back and try again.");
+
+  const isSponsorUpload = uploader.sponsorForClientId !== null;
+  const parentId = isSponsorUpload ? uploader.sponsorForClientId! : uploaderId;
+
+  const doc = await db.clientDocument.findFirst({
+    where: { id: docId, clientId: parentId },
+    include: {
+      checklistItem: true,
+      files: current,
+      client: {
+        include: {
+          caseworker: true,
+          firm: true,
+          sponsorAccounts: { where: { closedAt: null }, select: { id: true } },
+        },
+      },
+    },
+  });
+  if (!doc) throw new UserError("We could not find this document. Please go back and try again.");
+  if (doc.client.closedAt) throw new UserError("This case is closed. Please contact us if you need to send more documents.");
+
+  const sponsorActive = doc.client.sponsorAccounts.length > 0;
+  const owner = resolvedOwner(doc, sponsorActive);
+
+  if (isSponsorUpload && owner !== "SPONSOR")
+    throw new UserError("We could not find this document. Please go back and try again.");
+  if (!isSponsorUpload && owner !== "CLIENT")
+    throw new UserError("We could not find this document. Please go back and try again.");
+
+  const uploaderKind: "CLIENT" | "SPONSOR" = isSponsorUpload ? "SPONSOR" : "CLIENT";
+  return { doc, caseClient: doc.client, uploaderKind, uploaderId };
+}
+
 export async function uploadDocument(
-  clientId: string,
+  uploaderId: string,
   docId: string,
   files: FileInput[],
   options?: { multiPage?: boolean },
 ) {
-  const doc = await db.clientDocument.findFirst({
-    where: { id: docId, clientId },
-    include: { checklistItem: true, files: current, client: { include: { caseworker: true, firm: true } } },
-  });
-  if (!doc) throw new UserError("We could not find this document. Please go back and try again.");
-  if (doc.client.closedAt) throw new UserError("This case is closed. Please contact us if you need to send more documents.");
+  const { doc, caseClient: client, uploaderKind, uploaderId: actorId } = await resolveUploadAuth(uploaderId, docId);
+
   if (doc.status === "OK") throw new UserError("This document is already approved. You do not need to send it again.");
   if (!files.length) throw new UserError("Please choose a file to send.");
+
+  const actorType = uploaderKind === "SPONSOR" ? "SPONSOR" : "CLIENT";
 
   // Check every file before saving any of them
   const checked: { name: string; data: Buffer; kind: Awaited<ReturnType<typeof detectKind>> & {} }[] = [];
@@ -194,15 +337,16 @@ export async function uploadDocument(
         throw new UserError("Uploads are paused for a moment. Please try again in a few minutes.");
       }
       if (!result.clean) {
-        await audit({ firmId: doc.client.firmId, actorType: "CLIENT", actorId: clientId, action: "document.virus", targetId: doc.id });
-        console.error(`Upload refused for client ${clientId}: ${result.virus}`);
+        await audit({ firmId: client.firmId, actorType, actorId, action: "document.virus", targetId: doc.id });
+        console.error(`Upload refused for ${actorType} ${actorId}: ${result.virus}`);
         throw new UserError("This file could not be accepted. Please upload a different copy of the document.");
       }
     }
     checked.push({ name: f.name || "file", data: f.data, kind });
   }
 
-  const { client, checklistItem: item } = doc;
+  const { checklistItem: item } = doc;
+  // Always derive the folder from the parent case client (sponsors have no folder of their own)
   const folderPath = [...caseFolder(client), item.folder].join("/");
 
   // A redo replaces what was there: old files move to "_Old versions", never deleted
@@ -212,11 +356,9 @@ export async function uploadDocument(
     n = 0;
   }
 
-  // Saved straight to OneDrive / SharePoint; if Microsoft is unreachable, queued and retried (lib/storage-queue.ts)
   const date = ukDate();
 
   if (options?.multiPage && checked.length > 1) {
-    // Merge all pages into one PDF, then create a single FileUpload record
     const pdfPages = await Promise.all(checked.map((f) => toPdf(f.data, f.kind).then((r) => r.data)));
     const merged = await mergePdf(pdfPages);
     const upload = await db.fileUpload.create({
@@ -228,10 +370,11 @@ export async function uploadDocument(
         storageStatus: "PENDING",
         sizeBytes: merged.length,
         sha256: sha256(merged),
+        uploaderKind,
       },
     });
     await storeUpload(upload, merged);
-    await audit({ firmId: client.firmId, actorType: "CLIENT", actorId: client.id, action: "document.upload", targetId: upload.id });
+    await audit({ firmId: client.firmId, actorType, actorId, action: "document.upload", targetId: upload.id });
   } else {
     for (const f of checked) {
       const out = await toPdf(f.data, f.kind);
@@ -244,14 +387,16 @@ export async function uploadDocument(
           storageStatus: "PENDING",
           sizeBytes: out.data.length,
           sha256: sha256(out.data),
+          uploaderKind,
         },
       });
       await storeUpload(upload, out.data);
-      await audit({ firmId: client.firmId, actorType: "CLIENT", actorId: client.id, action: "document.upload", targetId: upload.id });
+      await audit({ firmId: client.firmId, actorType, actorId, action: "document.upload", targetId: upload.id });
     }
   }
 
   await db.clientDocument.update({ where: { id: doc.id }, data: { status: "SENT", note: null, redoSince: null, redoRemindedAt: null, missingReason: null, missingAt: null, missingResponse: null } });
+  // Always notify the parent case's caseworker (sponsorForClient.caseworker)
   await sendSafely({
     to: client.caseworker.email,
     brand: client.firm.name,
@@ -297,21 +442,50 @@ export async function reviewDocument(u: User, docId: string, action: "approve" |
   return {};
 }
 
-/* ---------- client "I don't have this" ---------- */
+/* ---------- client / sponsor "I don't have this" ---------- */
 
-export async function reportMissing(clientId: string, docId: string, reason: string) {
+export async function reportMissing(uploaderId: string, docId: string, reason: string) {
   const trimmed = reason.trim().slice(0, 500);
   if (!trimmed) throw new UserError("Please tell us why in a few words.");
+
+  const uploader = await db.client.findUnique({
+    where: { id: uploaderId },
+    select: { sponsorForClientId: true },
+  });
+  if (!uploader) throw new UserError("We could not find this document. Please go back and try again.");
+
+  const isSponsor = uploader.sponsorForClientId !== null;
+  const parentId = isSponsor ? uploader.sponsorForClientId! : uploaderId;
+
   const doc = await db.clientDocument.findFirst({
-    where: { id: docId, clientId },
-    include: { checklistItem: true, client: { include: { caseworker: true, firm: true } } },
+    where: { id: docId, clientId: parentId },
+    include: {
+      checklistItem: true,
+      client: {
+        include: {
+          caseworker: true,
+          firm: true,
+          sponsorAccounts: { where: { closedAt: null }, select: { id: true } },
+        },
+      },
+    },
   });
   if (!doc) throw new UserError("We could not find this document. Please go back and try again.");
   if (doc.client.closedAt) throw new UserError("This case is closed. Please contact us if you have questions.");
   if (doc.status !== "NEED") throw new UserError("You have already sent this document.");
+
+  const sponsorActive = doc.client.sponsorAccounts.length > 0;
+  const owner = resolvedOwner(doc, sponsorActive);
+  if (isSponsor && owner !== "SPONSOR")
+    throw new UserError("We could not find this document. Please go back and try again.");
+  if (!isSponsor && owner !== "CLIENT")
+    throw new UserError("We could not find this document. Please go back and try again.");
+
+  const actorType = isSponsor ? "SPONSOR" : "CLIENT";
   await db.clientDocument.update({ where: { id: doc.id }, data: { missingReason: trimmed, missingAt: new Date() } });
-  await audit({ firmId: doc.client.firmId, actorType: "CLIENT", actorId: clientId, action: "document.missing", targetId: doc.id });
+  await audit({ firmId: doc.client.firmId, actorType, actorId: uploaderId, action: "document.missing", targetId: doc.id });
   const { client, checklistItem: item } = doc;
+  // Always use the parent case's caseworker for notifications
   await sendSafely({
     to: client.caseworker.email,
     brand: client.firm.name,

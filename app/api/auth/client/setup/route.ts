@@ -40,13 +40,19 @@ export const POST = handler(async (req) => {
       where: { id: client.id },
       data: { ...details.data, passwordHash: await hashPassword(password), accountCreatedAt: new Date(), failedLogins: 0, lockedUntil: null },
     });
-    // OneDrive is slow (~0.75s a call): build the folders after the client is signed in. Uploads create any that are missing.
-    after(async () => {
-      const t = Date.now();
-      await createCaseFolders(updated, updated.routeId)
-        .then(() => console.log(`Case folders ready for ${updated.caseRef} in ${Date.now() - t} ms`))
-        .catch((err) => console.error(`Case folders for ${updated.caseRef} not created yet:`, err instanceof Error ? err.message : err));
-    });
+    // Sponsors share the parent case's OneDrive folder — no separate folder creation needed
+    if (!client.sponsorForClientId) {
+      // OneDrive is slow (~0.75s a call): build the folders after the client is signed in. Uploads create any that are missing.
+      after(async () => {
+        const t = Date.now();
+        await createCaseFolders(updated, updated.routeId)
+          .then(() => console.log(`Case folders ready for ${updated.caseRef} in ${Date.now() - t} ms`))
+          .catch((err) => console.error(`Case folders for ${updated.caseRef} not created yet:`, err instanceof Error ? err.message : err));
+      });
+    }
+    if (client.sponsorForClientId) {
+      await audit({ firmId: client.firmId, actorType: "SPONSOR", actorId: client.id, action: "sponsor.privacyConsent", targetId: client.id });
+    }
   } else {
     await db.client.update({ where: { id: client.id }, data: { passwordHash: await hashPassword(password), failedLogins: 0, lockedUntil: null } });
     await db.session.deleteMany({ where: { clientId: client.id } }); // sign out other devices

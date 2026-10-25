@@ -21,6 +21,8 @@ export const TEXT: Record<string, string> = {
   "client.reminder": "Reminder email sent: documents still needed",
   "client.reminder.redo": "Reminder email sent: please re-upload",
   "client.reminder.failed": "Reminder email could not be sent",
+  "sponsor.reminder": "Partner reminder email sent: documents still needed",
+  "sponsor.reminder.redo": "Partner reminder email sent: please re-upload",
   // Client OTP
   "client.otp.request": "Sign-in code sent by email",
   "client.otp.verify": "Signed in with email code",
@@ -49,6 +51,8 @@ export const TEXT: Record<string, string> = {
   "document.virus": "Upload refused: virus scanner flagged the file",
   "document.missing": "Client said they cannot find this document",
   "document.missing.respond": "Caseworker replied about missing document",
+  "document.reassign.CLIENT": "Document reassigned to client",
+  "document.reassign.SPONSOR": "Document reassigned to partner",
   // Storage
   "storage.retry": "Retried saving to OneDrive",
   // Reminders
@@ -57,6 +61,13 @@ export const TEXT: Record<string, string> = {
   // Messaging
   "message.send": "Message sent",
   "message.view": "Viewed messages",
+  // Sponsor / partner accounts
+  "sponsor.invite": "Sponsor account invite sent",
+  "sponsor.cancel": "Sponsor account cancelled",
+  "sponsor.visibleToClient.on": "Sponsor documents made visible to client",
+  "sponsor.visibleToClient.off": "Sponsor documents hidden from client",
+  "sponsor.privacyConsent": "Sponsor accepted privacy notice",
+  "sponsor.view": "Sponsor viewed their portal",
   // Admin
   "admin.firm.update": "Firm settings saved",
   "admin.user.add": "Team member added",

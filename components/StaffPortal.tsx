@@ -276,6 +276,7 @@ function CaseView({
       <DocReview
         doc={doc}
         folder={group.id}
+        hasSponsor={!!data.client.sponsor}
         onBack={() => history.back()}
         onRefresh={() => void load()}
         onDone={async (msg) => {
@@ -377,6 +378,7 @@ function CaseView({
             <Reminders clientId={view.id} summary={data.client.reminders} onChange={() => void load()} toast={toast} />
           </>
         )}
+        <SponsorCard clientId={view.id} sponsor={data.client.sponsor} closed={!!data.client.closedAt} toast={toast} onChange={() => void load()} />
         <CaseActions
           clientId={view.id}
           caseRef={data.client.caseRef}
@@ -427,7 +429,7 @@ function CaseView({
   );
 }
 
-function DocReview({ doc, folder, onBack, onDone, onRefresh }: { doc: Doc; folder: string; onBack: () => void; onDone: (msg: string) => void; onRefresh: () => void }) {
+function DocReview({ doc, folder, hasSponsor, onBack, onDone, onRefresh }: { doc: Doc; folder: string; hasSponsor: boolean; onBack: () => void; onDone: (msg: string) => void; onRefresh: () => void }) {
   const [asking, setAsking] = useState(false);
   const [note, setNote] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -443,12 +445,30 @@ function DocReview({ doc, folder, onBack, onDone, onRefresh }: { doc: Doc; folde
     onDone(r.data.warning ?? (action === "approve" ? "Approved" : "Sent to the client by email"));
   }
 
+  async function reassign(to: "CLIENT" | "SPONSOR") {
+    setBusy(true);
+    setError(null);
+    const r = await api<{ ok: boolean }>(`/api/staff/documents/${doc.id}/assign`, { method: "PATCH", json: { assignedTo: to } });
+    setBusy(false);
+    if (!r.ok) return setError(r.error);
+    onRefresh();
+  }
+
   return (
     <>
       <button type="button" className="back" onClick={onBack}>← Back</button>
       <div className="detail">
         <h2 data-focus tabIndex={-1}>{doc.title}</h2>
         <StatusPill status={doc.status} labels={STAFF_LABEL} />
+        {hasSponsor && (
+          <p className="muted" style={{ marginBottom: 0 }}>
+            Assigned to: <b>{doc.assignedTo === "SPONSOR" ? "Partner" : "Client"}</b>
+            {" · "}
+            <button type="button" className="link" disabled={busy} onClick={() => reassign(doc.assignedTo === "SPONSOR" ? "CLIENT" : "SPONSOR")}>
+              Reassign to {doc.assignedTo === "SPONSOR" ? "client" : "partner"}
+            </button>
+          </p>
+        )}
         {doc.status === "REDO" && doc.note && <div className="note"><b>You asked:</b> {doc.note}</div>}
         {doc.missingAt && (
           <div className="note">
@@ -462,25 +482,22 @@ function DocReview({ doc, folder, onBack, onDone, onRefresh }: { doc: Doc; folde
         ) : (
           <p className="muted">The client has not sent this yet.</p>
         )}
+        {error && <p className="error" role="alert">{error}</p>}
         {doc.status === "SENT" &&
           (asking ? (
             <>
               <label htmlFor="note" className="sr-only">Note to the client</label>
               <textarea id="note" rows={3} value={note} onChange={(e) => setNote(e.target.value)} placeholder="Tell the client what to fix, in plain words" autoFocus />
-              {error && <p className="error" role="alert">{error}</p>}
               <div className="btns">
                 <button type="button" className="ghost" disabled={busy} onClick={() => (setAsking(false), setError(null))}>Cancel</button>
                 <button type="button" className="big" disabled={busy} onClick={() => send("redo")}>Send to client</button>
               </div>
             </>
           ) : (
-            <>
-              {error && <p className="error" role="alert">{error}</p>}
-              <div className="btns">
-                <button type="button" className="ghost" disabled={busy} onClick={() => setAsking(true)}>Ask to redo</button>
-                <button type="button" className="big" disabled={busy} onClick={() => send("approve")}>Approve</button>
-              </div>
-            </>
+            <div className="btns">
+              <button type="button" className="ghost" disabled={busy} onClick={() => setAsking(true)}>Ask to redo</button>
+              <button type="button" className="big" disabled={busy} onClick={() => send("approve")}>Approve</button>
+            </div>
           ))}
       </div>
     </>
@@ -785,6 +802,102 @@ function SubmissionDate({ clientId, value, toast, onChange }: { clientId: string
           onBlur={(e) => { if (e.target.value !== (value ?? "")) save(e.target.value || null); }}
         />
       </div>
+    </section>
+  );
+}
+
+type SponsorInfo = { id: string; label: string; email: string; visibleToClient: boolean };
+
+function SponsorCard({ clientId, sponsor, closed, toast, onChange }: { clientId: string; sponsor: SponsorInfo | null; closed: boolean; toast: (m: string) => void; onChange: () => void }) {
+  const [inviting, setInviting] = useState(false);
+  const [email, setEmail] = useState(sponsor?.email ?? "");
+  const [label, setLabel] = useState(sponsor?.label ?? "");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function invite(e: React.FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    setError(null);
+    const r = await api<{ ok: boolean }>(`/api/staff/cases/${clientId}/sponsor`, { method: "POST", json: { email, label } });
+    setBusy(false);
+    if (!r.ok) return setError(r.error);
+    setInviting(false);
+    onChange();
+    toast("Partner invite sent");
+  }
+
+  async function cancel() {
+    if (!confirm("Cancel the partner account? They will no longer be able to upload documents.")) return;
+    setBusy(true);
+    const r = await api(`/api/staff/cases/${clientId}/sponsor`, { method: "DELETE" });
+    setBusy(false);
+    if (!r.ok) return toast(r.error);
+    onChange();
+    toast("Partner account cancelled");
+  }
+
+  async function toggleVisible(v: boolean) {
+    setBusy(true);
+    const r = await api(`/api/staff/cases/${clientId}/sponsor`, { method: "PATCH", json: { visibleToClient: v } });
+    setBusy(false);
+    if (!r.ok) return toast(r.error);
+    onChange();
+    toast(v ? "Partner documents now visible to client" : "Partner documents hidden from client");
+  }
+
+  return (
+    <section className="detail" aria-labelledby="sponsor-h">
+      <h2 id="sponsor-h">Partner account</h2>
+      {sponsor ? (
+        <>
+          <p>
+            <b>{sponsor.label}</b>
+            <br />
+            <span style={{ overflowWrap: "anywhere" }}>{sponsor.email}</span>
+          </p>
+          <p className="muted">
+            Partner documents {sponsor.visibleToClient ? "are visible to the main client" : "are hidden from the main client"}.
+            {" "}
+            <button type="button" className="link" disabled={busy} onClick={() => toggleVisible(!sponsor.visibleToClient)}>
+              {sponsor.visibleToClient ? "Hide from client" : "Make visible to client"}
+            </button>
+          </p>
+          {!closed && (
+            <>
+              <button type="button" className="ghost" disabled={busy} onClick={() => { setInviting(true); setEmail(sponsor.email); setLabel(sponsor.label); }}>
+                Re-invite partner
+              </button>
+              <button type="button" className="ghost" disabled={busy} onClick={cancel}>
+                Cancel partner account
+              </button>
+            </>
+          )}
+        </>
+      ) : (
+        !closed && !inviting && (
+          <button type="button" className="ghost" onClick={() => setInviting(true)}>
+            Add a partner (e.g. employer, sponsor)
+          </button>
+        )
+      )}
+      {inviting && (
+        <form onSubmit={invite} className="detail" style={{ paddingTop: 0 }}>
+          <div className="field">
+            <label htmlFor="sp-email">Partner email</label>
+            <input id="sp-email" type="email" className="input" value={email} onChange={(e) => setEmail(e.target.value)} required autoComplete="off" />
+          </div>
+          <div className="field">
+            <label htmlFor="sp-label">Label (e.g. Employer, Sponsor)</label>
+            <input id="sp-label" type="text" className="input" value={label} onChange={(e) => setLabel(e.target.value)} required maxLength={60} />
+          </div>
+          {error && <p className="error" role="alert">{error}</p>}
+          <div className="btns">
+            <button type="button" className="ghost" disabled={busy} onClick={() => { setInviting(false); setError(null); }}>Cancel</button>
+            <button type="submit" className="big" disabled={busy}>{busy ? "Sending…" : "Send invite"}</button>
+          </div>
+        </form>
+      )}
     </section>
   );
 }

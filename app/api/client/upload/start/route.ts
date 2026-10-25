@@ -34,13 +34,28 @@ export const POST = handler(async (req) => {
   const totalBytes = normalizedPages.reduce((s, p) => s + p.sizeBytes, 0);
   if (totalBytes > MAX_BYTES) return fail("Total file size exceeds 20 MB.");
 
+  // Sponsors upload to the parent case's documents
+  const parentId = client.sponsorForClientId ?? client.id;
   const doc = await db.clientDocument.findFirst({
-    where: { id: docId, clientId: client.id },
-    include: { client: true },
+    where: { id: docId, clientId: parentId },
+    include: {
+      client: {
+        include: { sponsorAccounts: { where: { closedAt: null }, select: { id: true } } },
+      },
+      checklistItem: { select: { assignedTo: true } },
+    },
   });
   if (!doc) return fail("Document not found.");
   if (doc.client.closedAt) return fail("This case is closed. Please contact us if you need to send more documents.");
   if (doc.status === "OK") return fail("This document is already approved. You do not need to send it again.");
+
+  // Verify the upload is to a document the uploader is allowed to upload
+  const { resolvedOwner } = await import("@/lib/sponsor");
+  const sponsorActive = doc.client.sponsorAccounts.length > 0;
+  const owner = resolvedOwner(doc, sponsorActive);
+  const isSponsorUpload = client.sponsorForClientId !== null;
+  if (isSponsorUpload && owner !== "SPONSOR") return fail("Document not found.");
+  if (!isSponsorUpload && owner !== "CLIENT") return fail("Document not found.");
 
   const session = await db.uploadSession.create({
     data: {

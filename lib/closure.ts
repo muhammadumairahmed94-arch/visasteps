@@ -4,9 +4,14 @@ import { db } from "./db";
 import { audit } from "./audit";
 import { UserError } from "./errors";
 import { deleteSessionChunks } from "./upload-sessions";
+import { cancelSponsor } from "./sponsor-ops";
 
-/** Same scoping as everywhere else: admins → whole firm, caseworkers → their own clients. */
-const visible = (u: User) => (u.role === "ADMIN" ? { firmId: u.firmId } : { firmId: u.firmId, caseworkerId: u.id });
+/** Same scoping as everywhere else: admins → whole firm, caseworkers → their own clients.
+ *  sponsorForClientId: null prevents accidentally closing a sponsor row as if it were a case. */
+const visible = (u: User) =>
+  u.role === "ADMIN"
+    ? { firmId: u.firmId, sponsorForClientId: null }
+    : { firmId: u.firmId, caseworkerId: u.id, sponsorForClientId: null };
 
 /**
  * Close (or reopen) a case. Closing signs the client out, stops their links and reminders, and keeps
@@ -17,6 +22,8 @@ export async function setCaseClosed(u: User, clientId: string, closed: boolean) 
   if (!client) throw new UserError("Not found.");
   await db.client.update({ where: { id: client.id }, data: { closedAt: closed ? new Date() : null } });
   if (closed) {
+    // Auto-cancel any active sponsor account before closing the main case
+    await cancelSponsor(client.id, u);
     await db.session.deleteMany({ where: { clientId: client.id } });
     await db.invite.updateMany({ where: { clientId: client.id, usedAt: null }, data: { usedAt: new Date() } });
     // Delete any in-progress upload session chunks (encrypted temp data)
@@ -35,7 +42,7 @@ export async function setCaseClosed(u: User, clientId: string, closed: boolean) 
 export async function deleteClient(u: User, clientId: string, confirm: string) {
   if (u.role !== "ADMIN") throw new UserError("Only admins can delete a client.");
   const client = await db.client.findFirst({
-    where: { id: clientId, firmId: u.firmId },
+    where: { id: clientId, firmId: u.firmId, sponsorForClientId: null },
     include: { documents: { include: { files: { include: { jobs: true } } } } },
   });
   if (!client) throw new UserError("Not found.");

@@ -40,7 +40,8 @@ We do not use cookies for advertising or tracking. The portal uses one essential
 - **Legitimate interests** — keeping the portal secure and keeping an audit trail (Article 6(1)(f)).
 - **Special category data** — [e.g. establishment, exercise or defence of legal claims / legal advice
   (Article 9(2)(f)) and/or explicit consent — confirm].
-- **Data about your partner, sponsor or employer** — [confirm basis; consider telling the client to share this notice with them].
+- **Data about your partner, sponsor or employer included in documents you upload** — [confirm basis; to the extent a third party's data is processed, the client is advised to share this notice with them].
+- **Partner/sponsor accounts** — where a partner or sponsor creates their own account (see section below), the lawful basis for processing their data is **contract** (the invite they accepted) or **legitimate interests** (supporting the main applicant's case) [confirm with lawyer].
 
 ## Who can see your data
 
@@ -58,6 +59,20 @@ International Data Transfer Agreement.]
 
 We share information with UK Visas and Immigration and other authorities only as part of your application,
 with your instructions, or where the law requires it.
+
+## Partner and sponsor accounts
+
+For some applications, UHA Legal may invite a third party — for example an employer, a financial sponsor or a family member ("partner") — to upload documents directly.
+
+When this happens:
+
+- The partner receives an invitation email and creates a separate account.
+- At first sign-in the partner is shown a short privacy notice and must accept it before continuing.
+- The partner can upload only the specific documents assigned to them.
+- Their uploaded documents are visible to UHA Legal staff. Your caseworker may also make them visible to you once satisfied with the content.
+- If the partner account is cancelled or your case is closed, the partner is signed out immediately and can no longer access the portal.
+
+The partner's personal data (email address, uploaded documents, sign-in records, audit entries) is held for the same period as the rest of your case file and is subject to the same rights described below. If you upload documents that also name a third party — for example payslips from an employer — please share this notice with that person.
 
 ## How long we keep it
 
