@@ -28,11 +28,18 @@ export const PATCH = handler(async (req, ctx: { params: Promise<{ id: string }> 
   if (assignedTo === "SPONSOR" && !sponsorActive) return fail("This case has no active partner account.");
 
   const wasOwner = resolvedOwner(doc, sponsorActive);
-  await db.clientDocument.update({ where: { id: docId }, data: { assignedToOverride: assignedTo } });
   const nowOwner = resolvedOwner({ ...doc, assignedToOverride: assignedTo }, sponsorActive);
+  const ownerChanging = wasOwner !== nowOwner;
 
-  // REDO → NEED when effective owner changes
-  if (wasOwner !== nowOwner && doc.status === "REDO") {
+  await db.clientDocument.update({
+    where: { id: docId },
+    data: {
+      assignedToOverride: assignedTo,
+      ...(ownerChanging && doc.missingAt ? { missingReason: null, missingAt: null, missingResponse: null } : {}),
+    },
+  });
+
+  if (ownerChanging && doc.status === "REDO") {
     await resetRedoForDocs([docId]);
   }
 

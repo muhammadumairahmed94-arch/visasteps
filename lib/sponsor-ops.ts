@@ -58,6 +58,21 @@ export async function cancelSponsor(
     .map((d) => d.id);
   await resetRedoForDocs(toReset);
 
+  // Clear "can't find" flags on docs whose effective owner was SPONSOR before cancel
+  const missingDocs = await db.clientDocument.findMany({
+    where: { clientId: parentClientId, missingAt: { not: null } },
+    include: { checklistItem: { select: { assignedTo: true } } },
+  });
+  const missingToReset = missingDocs
+    .filter((d) => resolvedOwner({ assignedToOverride: d.assignedToOverride, checklistItem: d.checklistItem }, true) === "SPONSOR")
+    .map((d) => d.id);
+  if (missingToReset.length) {
+    await db.clientDocument.updateMany({
+      where: { id: { in: missingToReset } },
+      data: { missingReason: null, missingAt: null, missingResponse: null },
+    });
+  }
+
   if (actor) {
     await audit({ firmId: actor.firmId, actorType: "USER", actorId: actor.id, action: "sponsor.cancel", targetId: parentClientId });
   }

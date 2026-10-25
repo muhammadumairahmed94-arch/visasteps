@@ -52,6 +52,14 @@ async function mailTo(to: string, subject: RegExp): Promise<Mail> {
 /** Shared TOTP key set during first-time setup; reused by subsequent sign-ins in the same run. */
 let adminTotpKey = "";
 
+/**
+ * The admin staff page created by the main journeys suite. Later suites that need
+ * staff API access share this page (and its cookies) rather than signing in again
+ * with a fresh TOTP code — the anti-replay window would reject a second code in the
+ * same 30-second slot.
+ */
+let sharedStaffPage: Page;
+
 /** Admin sign-in including first-time authenticator setup (the test plays the phone app). */
 async function staffSignIn(browser: Browser): Promise<{ ctx: BrowserContext; page: Page }> {
   const ctx = await browser.newContext();
@@ -93,6 +101,7 @@ test.describe.serial("main journeys", () => {
 
   test.beforeAll(async ({ browser }) => {
     staff = (await staffSignIn(browser)).page;
+    sharedStaffPage = staff;
     client = await (await browser.newContext()).newPage();
   });
 
@@ -156,7 +165,9 @@ test.describe.serial("main journeys", () => {
     await expect(staff.getByText("Sent to the client by email")).toBeVisible();
 
     const notice = await mailTo(clientEmail, /please re-upload/);
-    expect(notice.text).toContain("The photo is blurred");
+    // Caseworker note is shown in the portal, not in the email body
+    expect(notice.text).toContain("Your caseworker has left a note about");
+    expect(notice.text).not.toContain("The photo is blurred");
 
     // Client sees the request and uploads again
     await client.goto("/");
@@ -795,3 +806,123 @@ test.describe.serial("messaging", () => {
     await expect(phoneClient.getByRole("tab", { name: /Messages \(/ })).toHaveCount(0);
   });
 })
+
+// ---------------------------------------------------------------------------
+// Sponsor email routing — redo and "can't find" reply emails go to the partner,
+// not the main client. Requires TOTP configured by the main journeys suite.
+// ---------------------------------------------------------------------------
+test.describe.serial("sponsor — email routing", () => {
+  let staffPage: Page;
+  let aminaId: string;
+  let sentDocId: string;
+  let needDocId: string;
+  const sponsorEmail = "sponsor.routing@example.com";
+  const sponsorPassword = "SponsorTest123!";
+
+  test.beforeAll(async ({ playwright }) => {
+    // Reuse the admin session established by the main journeys suite — avoids a
+    // second TOTP sign-in which would be rejected by the anti-replay window.
+    staffPage = sharedStaffPage;
+
+    // Find Amina's case ID from the staff cases list
+    const casesRes = await staffPage.request.get("/api/staff/cases");
+    const { cases } = (await casesRes.json()) as { cases: { id: string; caseRef: string }[] };
+    const amina = cases.find((c) => c.caseRef === "IM-2041");
+    expect(amina).toBeDefined();
+    aminaId = amina!.id;
+
+    // Create a sponsor account for Amina's case
+    const sponsorRes = await staffPage.request.post(`/api/staff/cases/${aminaId}/sponsor`, {
+      data: { email: sponsorEmail, label: "Employer" },
+      headers: { "Content-Type": "application/json", "Origin": E2E.APP_URL },
+    });
+    expect(sponsorRes.status()).toBe(201);
+
+    // Read the sponsor invite email and extract the one-time setup token
+    // The invite URL is /i/{token} — the token is the last path segment, not a query param
+    const invite = await mailTo(sponsorEmail, /invitation to upload your documents/);
+    const token = new URL(invite.action!.url).pathname.split("/").pop()!;
+
+    // Set up the sponsor account via the setup API
+    const setupCtx = await playwright.request.newContext({ baseURL: E2E.APP_URL, extraHTTPHeaders: { Origin: E2E.APP_URL } });
+    const setupRes = await setupCtx.post("/api/auth/client/setup", {
+      data: { token, password: sponsorPassword, firstName: "Test", lastName: "Sponsor" },
+      headers: { "Content-Type": "application/json" },
+    });
+    expect(setupRes.status()).toBe(200);
+    await setupCtx.dispose();
+
+    // Fetch Amina's documents and pick one SENT and one NEED doc
+    const caseRes = await staffPage.request.get(`/api/staff/cases/${aminaId}`);
+    const caseView = (await caseRes.json()) as { groups: { docs: { id: string; title: string; status: string }[] }[] };
+    const allDocs = caseView.groups.flatMap((g) => g.docs);
+    sentDocId = allDocs.find((d) => d.status === "SENT")!.id;
+    needDocId = allDocs.find((d) => d.status === "NEED")!.id;
+    expect(sentDocId).toBeTruthy();
+    expect(needDocId).toBeTruthy();
+
+    // Assign the SENT doc to the sponsor
+    const assignRes = await staffPage.request.patch(`/api/staff/documents/${sentDocId}/assign`, {
+      data: { assignedTo: "SPONSOR" },
+      headers: { "Content-Type": "application/json", "Origin": E2E.APP_URL },
+    });
+    expect(assignRes.status()).toBe(200);
+  });
+
+  test("redo on a sponsor-assigned doc emails the sponsor, not the main client", async () => {
+    // Caseworker asks for a redo on the SPONSOR-assigned SENT doc
+    const reviewRes = await staffPage.request.post(`/api/staff/documents/${sentDocId}/review`, {
+      data: { action: "redo", note: "Wrong format — please re-submit as PDF" },
+      headers: { "Content-Type": "application/json", "Origin": E2E.APP_URL },
+    });
+    expect(reviewRes.status()).toBe(200);
+
+    // Sponsor receives the redo email
+    const sponsorMail = await mailTo(sponsorEmail, /please re-upload/);
+    expect(sponsorMail.to).toBe(sponsorEmail);
+
+    // The caseworker note text must NOT appear in the email body
+    expect(sponsorMail.text).not.toContain("Wrong format");
+
+    // Main client (Amina) must not have received a redo email for this doc
+    const aminaRedoMails = readdirSync(E2E.EMAIL_FILE_DIR)
+      .map((f) => JSON.parse(readFileSync(path.join(E2E.EMAIL_FILE_DIR, f), "utf8")) as Mail)
+      .filter((m) => m.to === "amina.khan@example.com" && /please re-upload/.test(m.subject));
+    expect(aminaRedoMails).toHaveLength(0);
+  });
+
+  test("a reply to a sponsor's 'can't find' emails the sponsor, not the main client", async ({ playwright }) => {
+    // Assign the NEED doc to the sponsor
+    const assignRes = await staffPage.request.patch(`/api/staff/documents/${needDocId}/assign`, {
+      data: { assignedTo: "SPONSOR" },
+      headers: { "Content-Type": "application/json", "Origin": E2E.APP_URL },
+    });
+    expect(assignRes.status()).toBe(200);
+
+    // Sign in as the sponsor and flag the doc as missing
+    const sponsorCtx = await playwright.request.newContext({ baseURL: E2E.APP_URL, extraHTTPHeaders: { Origin: E2E.APP_URL } });
+    const loginRes = await sponsorCtx.post("/api/auth/client/login", {
+      data: { email: sponsorEmail, password: sponsorPassword },
+      headers: { "Content-Type": "application/json" },
+    });
+    expect(loginRes.status()).toBe(200);
+
+    const missingRes = await sponsorCtx.post(`/api/client/documents/${needDocId}/missing`, {
+      data: { reason: "The employer cannot locate this certificate" },
+      headers: { "Content-Type": "application/json" },
+    });
+    expect(missingRes.status()).toBe(200);
+    await sponsorCtx.dispose();
+
+    // Caseworker replies to the missing flag
+    const respondRes = await staffPage.request.post(`/api/staff/documents/${needDocId}/missing`, {
+      data: { note: "Please ask HR for a certified copy" },
+      headers: { "Content-Type": "application/json", "Origin": E2E.APP_URL },
+    });
+    expect(respondRes.status()).toBe(200);
+
+    // Sponsor receives the reply email — not the main client
+    const sponsorMail = await mailTo(sponsorEmail, /caseworker left a note/);
+    expect(sponsorMail.to).toBe(sponsorEmail);
+  });
+});

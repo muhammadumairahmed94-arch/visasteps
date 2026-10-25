@@ -412,7 +412,7 @@ export async function uploadDocument(
 export async function reviewDocument(u: User, docId: string, action: "approve" | "redo", note?: string) {
   const doc = await db.clientDocument.findFirst({
     where: { id: docId, client: visibleCases(u) },
-    include: { checklistItem: true, client: { include: { firm: true } } },
+    include: { checklistItem: true, client: { include: { firm: true, sponsorAccounts: { where: { closedAt: null }, select: { id: true, email: true } } } } },
   });
   if (!doc) throw new UserError("Document not found.");
   if (doc.status !== "SENT") throw new UserError("Only documents waiting for review can be approved or sent back.");
@@ -428,16 +428,22 @@ export async function reviewDocument(u: User, docId: string, action: "approve" |
   await audit({ firmId: u.firmId, actorType: "USER", actorId: u.id, action: `document.${action}`, targetId: doc.id });
 
   if (action === "redo") {
-    const msg = `${doc.client.firm.name}: please re-upload ${doc.checklistItem.title}. Client portal: ${appUrl()}/`;
-    if (doc.client.mobile) await sms().send(doc.client.mobile, msg);
+    const sponsorActive = doc.client.sponsorAccounts.length > 0;
+    const owner = resolvedOwner(doc, sponsorActive);
+    const activeSponsor = doc.client.sponsorAccounts[0];
+    const isSponsor = owner === "SPONSOR" && !!activeSponsor;
+    const toEmail = isSponsor ? activeSponsor.email : doc.client.email;
+    if (!isSponsor && doc.client.mobile) {
+      await sms().send(doc.client.mobile, `${doc.client.firm.name}: please re-upload ${doc.checklistItem.title}. Client portal: ${appUrl()}/`);
+    }
     const sent = await sendSafely({
-      to: doc.client.email,
+      to: toEmail,
       brand: doc.client.firm.name,
       subject: `${doc.client.firm.name}: please re-upload ${doc.checklistItem.title}`,
-      text: `Please upload ${doc.checklistItem.title} again.\n\nCaseworker note: ${text}`,
-      action: { label: "Open client portal", url: `${appUrl()}/` },
+      text: `Your caseworker has left a note about ${doc.checklistItem.title}. Open the portal to read it and upload again.`,
+      action: { label: isSponsor ? "Open partner portal" : "Open client portal", url: `${appUrl()}/` },
     });
-    if (!sent) return { warning: "Saved, but the email to the client could not be sent. Please contact the client directly." };
+    if (!sent) return { warning: `Saved, but the email to the ${isSponsor ? "partner" : "client"} could not be sent. Please contact the ${isSponsor ? "partner" : "client"} directly.` };
   }
   return {};
 }
@@ -485,12 +491,13 @@ export async function reportMissing(uploaderId: string, docId: string, reason: s
   await db.clientDocument.update({ where: { id: doc.id }, data: { missingReason: trimmed, missingAt: new Date() } });
   await audit({ firmId: doc.client.firmId, actorType, actorId: uploaderId, action: "document.missing", targetId: doc.id });
   const { client, checklistItem: item } = doc;
+  const actorLabel = isSponsor ? `Partner of ${fullName(client)}` : fullName(client);
   // Always use the parent case's caseworker for notifications
   await sendSafely({
     to: client.caseworker.email,
     brand: client.firm.name,
-    subject: `${fullName(client)} (${client.caseRef}) cannot find: ${item.title}`,
-    text: `${fullName(client)} has left a note about ${item.title}. Open the portal to read it and reply.`,
+    subject: `${actorLabel} (${client.caseRef}) cannot find: ${item.title}`,
+    text: `${actorLabel} has left a note about ${item.title}. Open the portal to read it and reply.`,
     action: { label: "View in portal", url: `${appUrl()}/staff#c/${client.id}/missing` },
   });
 }
@@ -500,7 +507,7 @@ export async function reportMissing(uploaderId: string, docId: string, reason: s
 export async function respondToMissing(u: User, docId: string, note: string) {
   const doc = await db.clientDocument.findFirst({
     where: { id: docId, client: visibleCases(u) },
-    include: { checklistItem: true, client: { include: { firm: true } } },
+    include: { checklistItem: true, client: { include: { firm: true, sponsorAccounts: { where: { closedAt: null }, select: { id: true, email: true } } } } },
   });
   if (!doc) throw new UserError("Document not found.");
   if (!doc.missingAt) throw new UserError("This document has not been flagged as missing.");
@@ -508,12 +515,17 @@ export async function respondToMissing(u: User, docId: string, note: string) {
   await db.clientDocument.update({ where: { id: doc.id }, data: { missingReason: null, missingAt: null, missingResponse: trimmed } });
   await audit({ firmId: u.firmId, actorType: "USER", actorId: u.id, action: "document.missing.respond", targetId: doc.id });
   if (trimmed) {
+    const sponsorActive = doc.client.sponsorAccounts.length > 0;
+    const owner = resolvedOwner(doc, sponsorActive);
+    const activeSponsor = doc.client.sponsorAccounts[0];
+    const isSponsor = owner === "SPONSOR" && !!activeSponsor;
+    const toEmail = isSponsor ? activeSponsor.email : doc.client.email;
     await sendSafely({
-      to: doc.client.email,
+      to: toEmail,
       brand: doc.client.firm.name,
       subject: `${doc.client.firm.name}: your caseworker left a note about ${doc.checklistItem.title}`,
       text: `Your caseworker has left a note about ${doc.checklistItem.title}. Open the portal to read it.`,
-      action: { label: "Open client portal", url: `${appUrl()}/` },
+      action: { label: isSponsor ? "Open partner portal" : "Open client portal", url: `${appUrl()}/` },
     });
   }
 }
