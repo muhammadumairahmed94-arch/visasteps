@@ -42,7 +42,9 @@ export default function MessageThread({ endpoint, senderKind, onRead }: Props) {
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void refresh();
-    const interval = setInterval(refresh, 30_000);
+    const interval = setInterval(() => {
+      if (document.visibilityState === "visible") void refresh();
+    }, 30_000);
     const onFocus = () => void refresh();
     const onVisibility = () => { if (document.visibilityState === "visible") void refresh(); };
     window.addEventListener("focus", onFocus);

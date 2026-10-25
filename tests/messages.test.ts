@@ -183,6 +183,21 @@ describe("sendMessage", () => {
     expect(audit).toHaveBeenCalledWith(expect.objectContaining({ action: "message.send" }));
   });
 
+  it("returns the actual sender's name, not the assigned caseworker's name", async () => {
+    // Admin (different from the assigned caseworker) sends a message.
+    const client = makeClient({ caseworker: { id: "cw1", name: "Sara", email: "sara@example.com" } });
+    mocks.client.findUnique.mockResolvedValue(client);
+    const admin = makeUser({ id: "admin1", name: "Admin User", role: "ADMIN" as never }) as never;
+    mocks.message.create.mockResolvedValue({
+      id: "m3", senderKind: "STAFF", staffId: "admin1", body: enc("hi"),
+      createdAt: new Date(), readAt: null, staff: { name: "Admin User" },
+    });
+
+    const result = await sendMessage("c1", { kind: "STAFF", user: admin }, "hi");
+
+    expect(result.senderName).toBe("Admin User");
+  });
+
   it("notifies client when staff sends", async () => {
     const client = makeClient();
     mocks.client.findUnique.mockResolvedValue(client);

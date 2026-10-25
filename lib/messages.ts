@@ -83,7 +83,7 @@ export async function sendMessage(
   return {
     id: msg.id,
     senderKind: msg.senderKind as "CLIENT" | "STAFF",
-    senderName: sender.kind === "CLIENT" ? fullName(client) : client.caseworker.name,
+    senderName: sender.kind === "CLIENT" ? fullName(client) : (sender as { kind: "STAFF"; user: User }).user.name,
     body: trimmed,
     createdAt: msg.createdAt.toISOString(),
     readAt: msg.readAt?.toISOString() ?? null,
