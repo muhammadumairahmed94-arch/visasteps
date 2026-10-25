@@ -372,7 +372,7 @@ describe("complete route — double-tap protection", () => {
     const res = await completePOST(makeCompleteReq("s1"), { params: Promise.resolve({ sid: "s1" }) });
     expect(res.status).toBe(200);
     const { message } = await res.json() as { message: string };
-    expect(message).toBe("Already received.");
+    expect(message).toBe("We're already sending this document. Please wait a moment.");
   });
 
   it("returns 404 when the session does not exist at all", async () => {

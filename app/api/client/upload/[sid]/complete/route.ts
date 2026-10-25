@@ -29,7 +29,7 @@ export const POST = handler(async (req, ctx: { params: Promise<{ sid: string }> 
     if (!exists) return fail("Session not found.", 404);
     if (exists.expiresAt <= new Date()) return fail("Upload session has expired.", 410);
     // completingAt is already set: a concurrent request is (or was) processing this session
-    return json({ message: "Already received." });
+    return json({ message: "We're already sending this document. Please wait a moment." });
   }
 
   const session = await db.uploadSession.findUnique({ where: { id: sid } });
