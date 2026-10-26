@@ -23,7 +23,13 @@ const nextConfig: NextConfig = {
   cacheComponents: true,
   partialPrefetching: true,
   poweredByHeader: false,
-  serverExternalPackages: ["@prisma/client"],
+  serverExternalPackages: ["@prisma/client", "pdfjs-dist"],
+  // pdfjs-dist must be loaded at runtime (not bundled by turbopack) so it can read files
+  // via node:fs and properly spawn its worker. The legacy pdf.mjs is not auto-traced because
+  // it is referenced only via a dynamic import string — add it explicitly.
+  outputFileTracingIncludes: {
+    "/**": ["./node_modules/pdfjs-dist/legacy/build/pdf.mjs"],
+  },
   output: "standalone", // self-contained server for the Docker image
   async headers() {
     return [

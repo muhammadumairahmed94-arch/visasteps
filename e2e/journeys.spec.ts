@@ -1,6 +1,9 @@
 import { readdirSync, readFileSync, existsSync } from "node:fs";
+import { createHash } from "node:crypto";
 import path from "node:path";
 import { expect, test, type Browser, type BrowserContext, type Page } from "@playwright/test";
+import { PDFDocument } from "pdf-lib";
+import fontkit from "@pdf-lib/fontkit";
 import { Secret, TOTP } from "otpauth";
 import { E2E } from "./env";
 
@@ -13,6 +16,22 @@ import { E2E } from "./env";
 
 const fixture = (name: string) => path.join(__dirname, "..", "tests", "fixtures", name);
 const clientEmail = `e2e.client.${Date.now()}@example.com`;
+
+/**
+ * Build a single-page PDF using pdf-lib with LiberationSans embedded as a TrueType font.
+ * pdf-lib+fontkit generates a ToUnicode CMap so pdfjs can extract the text in any environment
+ * without needing standardFontDataUrl (standard-font-only PDFs require it and fail in some builds).
+ */
+async function buildTextPdf(text: string): Promise<Buffer> {
+  const fontPath = path.join(__dirname, "../node_modules/pdfjs-dist/standard_fonts/LiberationSans-Regular.ttf");
+  const fontBytes = readFileSync(fontPath);
+  const doc = await PDFDocument.create();
+  doc.registerFontkit(fontkit);
+  const font = await doc.embedFont(fontBytes, { subset: true });
+  const page = doc.addPage([595, 842]);
+  page.drawText(text, { x: 60, y: 760, size: 12, font });
+  return Buffer.from(await doc.save());
+}
 
 // 1×1 transparent PNG — just small enough to trigger the "tiny" quality warning
 const TINY_PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=", "base64");
@@ -1096,7 +1115,7 @@ test.describe.serial("requirements", () => {
   });
 });
 
-test.describe.serial("analysis tab — A1/A2/A3/A4", () => {
+test.describe.serial("analysis tab — A1/A2/A3/A4/A5", () => {
   const mutHeaders = { Origin: E2E.APP_URL };
   let clientId = "";
 
@@ -1156,7 +1175,7 @@ test.describe.serial("analysis tab — A1/A2/A3/A4", () => {
     expect(res.status()).toBe(404);
   });
 
-  test("A3: with aiEnabled=false, GET returns view with aiEnabled:false; POST returns 400", async () => {
+  test("A3: with aiEnabled=false, GET returns view with aiEnabled:false; POST returns 403", async () => {
     await setAiEnabled(false);
 
     const getRes = await sharedStaffPage.request.get(`/api/staff/cases/${clientId}/analysis`);
@@ -1168,7 +1187,7 @@ test.describe.serial("analysis tab — A1/A2/A3/A4", () => {
       headers: mutHeaders,
       data: JSON.stringify({ question: "test" }),
     });
-    expect(postRes.status()).toBe(400);
+    expect(postRes.status()).toBe(403);
 
     // Re-enable for remaining tests
     await setAiEnabled(true);
@@ -1183,5 +1202,62 @@ test.describe.serial("analysis tab — A1/A2/A3/A4", () => {
     const result = await res.json() as { notFound: boolean; answer: string };
     expect(result.notFound).toBe(true);
     expect(result.answer).toContain("couldn't confirm");
+  });
+
+  test("A5: upload text PDF, ask a question, answer shows a verified page citation", async ({ playwright }) => {
+    // Build a single-page PDF using pdf-lib with LiberationSans embedded (ToUnicode CMap, no standardFontDataUrl needed).
+    // Text is under 80 chars so the FakeAdapter's quote = the full text and quoteFound is guaranteed.
+    const KNOWN_TEXT = "Applicant submitted valid passport with all required supporting documents for review.";
+    const pdfBuf = await buildTextPdf(KNOWN_TEXT);
+
+    // Sign in as Amina Khan and find an uploadable document
+    const clientCtx = await playwright.request.newContext({
+      baseURL: E2E.APP_URL,
+      extraHTTPHeaders: { Origin: E2E.APP_URL },
+    });
+    await clientCtx.post("/api/auth/client/login", {
+      data: { email: "amina.khan@example.com", password: E2E.SEED_CLIENT_PASSWORD },
+    });
+
+    const portalRes = await clientCtx.get("/api/client/portal");
+    expect(portalRes.status()).toBe(200);
+    const portal = await portalRes.json() as { groups: { docs: { id: string; status: string; readOnly: boolean }[] }[] };
+    const uploadableDoc = portal.groups.flatMap((g) => g.docs).find((d) => d.status !== "OK" && !d.readOnly);
+    expect(uploadableDoc, "Amina's case needs at least one non-OK non-readOnly document for A5").toBeTruthy();
+
+    // SHA-256 of the PDF for the upload protocol
+    const hash = createHash("sha256").update(pdfBuf).digest("hex");
+
+    // Start → chunk → complete
+    const startRes = await clientCtx.post("/api/client/upload/start", {
+      data: { docId: uploadableDoc!.id, pages: [{ fileName: "a5-test.pdf", sizeBytes: pdfBuf.length, sha256: hash, totalChunks: 1 }], multiPage: false },
+    });
+    expect(startRes.status()).toBe(200);
+    const { sessionId } = await startRes.json() as { sessionId: string };
+
+    const chunkRes = await clientCtx.put(`/api/client/upload/${sessionId}/chunk?page=0&n=0`, { data: pdfBuf });
+    expect(chunkRes.status()).toBe(200);
+
+    const completeRes = await clientCtx.post(`/api/client/upload/${sessionId}/complete`);
+    expect(completeRes.status()).toBe(200);
+    await clientCtx.dispose();
+
+    // Ask a question via the staff session — fake AI creates one claim per source
+    const qRes = await sharedStaffPage.request.post(
+      `/api/staff/cases/${clientId}/analysis`,
+      { headers: mutHeaders, data: JSON.stringify({ question: "What passport details are recorded?" }) },
+    );
+    expect(qRes.status()).toBe(200);
+    const result = await qRes.json() as {
+      answer: string;
+      claims: { kind: string; pageNumber?: number; verified?: boolean }[];
+      notFound: boolean;
+    };
+
+    // The uploaded PDF yields a verified claim; seeded files are too short or image-only → dropped
+    expect(result.notFound).toBe(false);
+    expect(result.answer).toMatch(/\(page \d+\)/);
+    const verifiedClaim = result.claims.find((c) => c.kind === "client-document" && c.verified === true && c.pageNumber === 1);
+    expect(verifiedClaim, "expected a verified page-1 client-document claim from the uploaded PDF").toBeTruthy();
   });
 });

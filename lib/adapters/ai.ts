@@ -309,7 +309,7 @@ class FakeAdapter implements AiAdapter {
       return { answer: NOT_FOUND_ANSWER, claims: [], notFound: true };
     }
     const claims: AiCaseClaim[] = input.sources.map((s) => ({
-      claimText: `Evidence from ${s.label}`,
+      claimText: `Evidence from ${s.label.replace(/, page \d+$/, "")}`,
       quote: s.text.slice(0, 80).trim(),
       kind: s.kind,
       fileId: s.fileId,
