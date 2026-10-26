@@ -194,6 +194,23 @@ function DraftControls({ route, onRefresh, toast }: {
               )}
             </div>
           ))}
+
+          {run.rejectedDrafts.length > 0 && (
+            <details className="rejected-drafts">
+              <summary className="muted small">
+                {run.rejectedDrafts.length} draft{run.rejectedDrafts.length === 1 ? "" : "s"} rejected — expand to review
+              </summary>
+              <ul className="rejected-list">
+                {run.rejectedDrafts.map((r) => (
+                  <li key={r.id}>
+                    <strong>{r.whatIsChecked}</strong>
+                    <span className="muted small"> — {r.reason}</span>
+                    <span className="muted small"> (cited: {r.citationLocator})</span>
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )}
         </div>
       )}
     </div>

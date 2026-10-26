@@ -55,6 +55,7 @@ async function main() {
     db.checklistSuggestion.deleteMany(),
     db.requirement.deleteMany(),
     db.mentionedSource.deleteMany(),
+    db.rejectedDraft.deleteMany(),
     db.draftRun.deleteMany(),
     db.guidancePage.deleteMany(),
     db.guidanceSourceOnRoute.deleteMany(),

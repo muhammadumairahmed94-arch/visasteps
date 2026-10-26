@@ -5,6 +5,7 @@ import { audit } from "./audit";
 import { limit } from "./ratelimit";
 import { decrypt } from "./crypto";
 import { UserError } from "./errors";
+import { numbersInQuote } from "./draft-runs";
 
 const PURPOSE = "guidance-text";
 
@@ -94,6 +95,21 @@ export async function editRequirement(admin: User, requirementId: string, rawEdi
     const pageText = decrypt(page.encryptedText, PURPOSE);
     if (!normalise(pageText).includes(normalise(newQuote))) {
       throw new UserError("The quote was not found in the cited section. Check the citation and quote are correct.");
+    }
+
+    if (edits.citationQuote !== undefined) {
+      const normQuote = normalise(newQuote);
+      const wordCount = normQuote.split(/\s+/).filter(Boolean).length;
+      if (wordCount < 8 || normQuote.length < 40) {
+        throw new UserError("The quote must be at least 8 words and 40 characters long.");
+      }
+    }
+  }
+
+  if (edits.citationQuote !== undefined || edits.limitOrThreshold !== undefined) {
+    const finalThreshold = edits.limitOrThreshold !== undefined ? edits.limitOrThreshold : req.limitOrThreshold;
+    if (finalThreshold && !numbersInQuote(finalThreshold, newQuote)) {
+      throw new UserError("The number or amount stated in the limit must appear verbatim in the quote.");
     }
   }
 
@@ -254,6 +270,7 @@ export async function requirementsView(staff: User) {
         include: {
           sources: { include: { source: { select: { title: true } } } },
           initiatedBy: { select: { name: true } },
+          rejectedDrafts: { orderBy: { id: "asc" } },
         },
         take: 5,
       })
@@ -300,6 +317,12 @@ export async function requirementsView(staff: User) {
                 status: s.status,
                 requirementsFound: s.requirementsFound,
                 errorMessage: s.errorMessage,
+              })),
+              rejectedDrafts: latestRun.rejectedDrafts.map((r) => ({
+                id: r.id,
+                whatIsChecked: r.whatIsChecked,
+                citationLocator: r.citationLocator,
+                reason: r.reason,
               })),
             }
           : null,

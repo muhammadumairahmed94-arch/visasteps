@@ -10,17 +10,66 @@ function normalise(text: string): string {
   return text.replace(/\s+/g, " ").replace(/­/g, "").toLowerCase();
 }
 
-function verifyQuote(quote: string, sections: Array<{ locator: string; text: string }>): boolean {
-  const normQuote = normalise(quote);
-  return sections.some((s) => normalise(s.text).includes(normQuote));
+/** Extract digit sequences (with comma thousand-separators stripped) from text. */
+export function extractRawNumbers(text: string): string[] {
+  const matches = text.match(/\d[\d,]*(?:\.\d+)?/g) ?? [];
+  return matches.map((m) => m.replace(/,/g, "")).filter((n) => n.length > 0);
 }
 
-function filterVerified(drafts: RequirementDraft[], sections: Array<{ locator: string; text: string }>): RequirementDraft[] {
-  const sectionMap = new Map(sections.map((s) => [s.locator, normalise(s.text)]));
-  return drafts.filter((d) => {
-    const page = sectionMap.get(d.citationLocator);
-    return !!page && page.includes(normalise(d.citationQuote));
+/**
+ * Check that every number in limitOrThreshold appears in the quote.
+ * Allows formatting differences: £29,000 in the threshold matches £29000 in the quote.
+ */
+export function numbersInQuote(limitOrThreshold: string, quote: string): boolean {
+  const numbers = extractRawNumbers(limitOrThreshold);
+  if (numbers.length === 0) return true;
+  const strippedQuote = quote.replace(/,/g, "");
+  return numbers.every((n) => {
+    const escaped = n.replace(/\./g, "\\.");
+    const re = new RegExp(`(?<!\\d)${escaped}(?!\\d)`);
+    return re.test(strippedQuote);
   });
+}
+
+export type RejectionReason = "quote not found" | "quote too short" | "number not in quote";
+
+export type RejectedDraftInfo = { draft: RequirementDraft; reason: RejectionReason };
+
+/**
+ * Classify drafts into verified (pass all checks) and rejected (fail one check with a reason).
+ * Checks in order: quote present → quote long enough → threshold number present in quote.
+ */
+export function classifyDrafts(
+  drafts: RequirementDraft[],
+  sections: Array<{ locator: string; text: string }>,
+): { verified: RequirementDraft[]; rejected: RejectedDraftInfo[] } {
+  const sectionMap = new Map(sections.map((s) => [s.locator, normalise(s.text)]));
+  const verified: RequirementDraft[] = [];
+  const rejected: RejectedDraftInfo[] = [];
+
+  for (const d of drafts) {
+    const page = sectionMap.get(d.citationLocator);
+    if (!page || !page.includes(normalise(d.citationQuote))) {
+      rejected.push({ draft: d, reason: "quote not found" });
+      continue;
+    }
+
+    const normQuote = normalise(d.citationQuote);
+    const wordCount = normQuote.split(/\s+/).filter(Boolean).length;
+    if (wordCount < 8 || normQuote.length < 40) {
+      rejected.push({ draft: d, reason: "quote too short" });
+      continue;
+    }
+
+    if (d.limitOrThreshold && !numbersInQuote(d.limitOrThreshold, d.citationQuote)) {
+      rejected.push({ draft: d, reason: "number not in quote" });
+      continue;
+    }
+
+    verified.push(d);
+  }
+
+  return { verified, rejected };
 }
 
 /**
@@ -75,7 +124,7 @@ export async function processDraftRuns(): Promise<void> {
       const sections = pages.map((p) => ({ locator: p.locator, text: decrypt(p.encryptedText, PURPOSE) }));
       const output = await ai().draftRequirements(run.route.name, runSource.source.title, sections);
 
-      const verified = filterVerified(output.requirements, sections);
+      const { verified, rejected } = classifyDrafts(output.requirements, sections);
       let count = 0;
 
       for (const draft of verified) {
@@ -94,6 +143,22 @@ export async function processDraftRuns(): Promise<void> {
           },
         });
         count++;
+      }
+
+      for (const { draft, reason } of rejected) {
+        await db.rejectedDraft.create({
+          data: {
+            runId: run.id,
+            runSourceId: runSource.id,
+            whatIsChecked: draft.whatIsChecked,
+            ruleType: draft.ruleType,
+            limitOrThreshold: draft.limitOrThreshold ?? null,
+            evidenceNeeded: draft.evidenceNeeded,
+            citationLocator: draft.citationLocator,
+            citationQuote: draft.citationQuote,
+            reason,
+          },
+        });
       }
 
       for (const ref of output.mentionedSources) {
@@ -136,5 +201,3 @@ export async function processDraftRuns(): Promise<void> {
     },
   });
 }
-
-export { verifyQuote, filterVerified };

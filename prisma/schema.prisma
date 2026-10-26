@@ -462,9 +462,10 @@ model DraftRun {
   startedAt      DateTime?
   completedAt    DateTime?
   errorMessage   String?
-  sources        DraftRunSource[]
-  requirements   Requirement[]
+  sources          DraftRunSource[]
+  requirements     Requirement[]
   mentionedSources MentionedSource[]
+  rejectedDrafts   RejectedDraft[]
 
   @@index([firmId, routeId, createdAt])
   @@index([status])
@@ -480,6 +481,7 @@ model DraftRunSource {
   status            DraftSourceStatus @default(PENDING)
   requirementsFound Int               @default(0)
   errorMessage      String?
+  rejectedDrafts    RejectedDraft[]
 }
 
 /**
@@ -542,6 +544,24 @@ model ChecklistSuggestion {
   createdAt     DateTime    @default(now())
 
   @@index([firmId, status])
+}
+
+/** A draft requirement that failed quote verification. Stored so admins can add it by hand if genuine. */
+model RejectedDraft {
+  id               String        @id @default(cuid())
+  runId            String
+  run              DraftRun      @relation(fields: [runId], references: [id], onDelete: Cascade)
+  runSourceId      String
+  runSource        DraftRunSource @relation(fields: [runSourceId], references: [id], onDelete: Cascade)
+  whatIsChecked    String
+  ruleType         String
+  limitOrThreshold String?
+  evidenceNeeded   String
+  citationLocator  String
+  citationQuote    String
+  reason           String        // "quote not found" | "quote too short" | "number not in quote"
+
+  @@index([runId])
 }
 
 /** An expected source type per route (e.g. "Main appendix", "Evidence rules"). */
