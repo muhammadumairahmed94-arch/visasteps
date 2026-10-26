@@ -97,18 +97,6 @@ async function loadClientSources(staff: User, clientId: string, folderFilter?: s
           },
         },
       },
-      sponsorAccounts: {
-        include: {
-          documents: {
-            include: {
-              checklistItem: { select: { title: true, folder: true } },
-              files: {
-                where: { storageStatus: "SAVED", supersededAt: null, oneDriveItemId: { not: null } },
-              },
-            },
-          },
-        },
-      },
     },
   });
   if (!client) throw new NotFoundError("Not found.");
@@ -120,14 +108,6 @@ async function loadClientSources(staff: User, clientId: string, folderFilter?: s
     const { title, folder } = doc.checklistItem;
     for (const file of doc.files) {
       allDocs.push({ title, folder, fileId: file.id, uploaderKind: file.uploaderKind });
-    }
-  }
-  for (const sponsor of client.sponsorAccounts) {
-    for (const doc of sponsor.documents) {
-      const { title, folder } = doc.checklistItem;
-      for (const file of doc.files) {
-        allDocs.push({ title, folder, fileId: file.id, uploaderKind: "SPONSOR" });
-      }
     }
   }
 
@@ -207,13 +187,7 @@ export function verifyAndAnnotateClaims(
       pageText = guidanceMap.get(`${claim.sourceId}:${claim.locator}`);
     }
 
-    if (!pageText) {
-      if (claim.kind === "guidance") {
-        result.push({ ...claim, verified: false });
-      }
-      // client-doc claims with no page → drop
-      continue;
-    }
+    if (!pageText) continue;
 
     const normPage = normalise(pageText);
     const normQuote = normalise(claim.quote);
@@ -224,15 +198,23 @@ export function verifyAndAnnotateClaims(
     const numbersOk = !numbersInQuote || numbersInQuote(claim.claimText, claim.quote);
 
     const verified = quoteFound && longEnough && numbersOk;
-
-    if (claim.kind === "client-document") {
-      if (verified) result.push({ ...claim, verified: true });
-      // else: drop the claim silently
-    } else {
-      result.push({ ...claim, verified });
-    }
+    if (verified) result.push({ ...claim, verified: true });
   }
   return result;
+}
+
+export function buildAnswer(verifiedClaims: AiCaseClaim[], droppedCount: number): string {
+  if (verifiedClaims.length === 0) {
+    return "I couldn't confirm an answer from the client's documents or the uploaded guidance.";
+  }
+  const sentences = verifiedClaims
+    .map((c) => {
+      const cite = c.kind === "guidance" ? (c.locator ?? "guidance") : `page ${c.pageNumber ?? "?"}`;
+      return `${c.claimText} (${cite})`;
+    })
+    .join(" ");
+  if (droppedCount === 0) return sentences;
+  return `${sentences} ${droppedCount} statement${droppedCount === 1 ? "" : "s"} couldn't be matched to the documents and were left out.`;
 }
 
 export async function askCaseQuestion(
@@ -273,8 +255,11 @@ export async function askCaseQuestion(
     }
   }
 
+  const totalClaims = raw.claims.length;
   const verifiedClaims = verifyAndAnnotateClaims(raw.claims, pageMap, guidanceMap);
-  const result: AiCaseResult = { ...raw, claims: verifiedClaims };
+  const droppedCount = totalClaims - verifiedClaims.length;
+  const builtAnswer = buildAnswer(verifiedClaims, droppedCount);
+  const result: AiCaseResult = { answer: builtAnswer, claims: verifiedClaims, notFound: verifiedClaims.length === 0 };
 
   const foldersUsed = folders.map((f) => f.id);
   if (firm.analysisHistoryEnabled) {

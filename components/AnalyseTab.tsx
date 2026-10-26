@@ -108,7 +108,7 @@ export default function AnalyseTab({ clientId, view, onRefresh, toast }: Props) 
 
       {result && (
         <div className="analyse-result" role="status" aria-live="polite">
-          <p className={result.notFound ? "muted" : ""}>{result.answer}</p>
+          <p>{result.answer}</p>
           {result.claims.length > 0 && (
             <details className="analyse-claims">
               <summary className="muted small">{result.claims.length} citation{result.claims.length === 1 ? "" : "s"}</summary>
@@ -116,7 +116,6 @@ export default function AnalyseTab({ clientId, view, onRefresh, toast }: Props) 
                 {result.claims.map((c, i) => (
                   <li key={i}>
                     <span className="muted small">{c.kind === "guidance" ? "Guidance" : "Document"}</span>
-                    {c.verified === false && <span className="muted small"> (unclear)</span>}
                     <blockquote className="claim-quote">{c.quote}</blockquote>
                   </li>
                 ))}

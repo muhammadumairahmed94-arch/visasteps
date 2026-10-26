@@ -1182,6 +1182,6 @@ test.describe.serial("analysis tab — A1/A2/A3/A4", () => {
     expect(res.status()).toBe(200);
     const result = await res.json() as { notFound: boolean; answer: string };
     expect(result.notFound).toBe(true);
-    expect(result.answer).toContain("not in the client");
+    expect(result.answer).toContain("couldn't confirm");
   });
 });

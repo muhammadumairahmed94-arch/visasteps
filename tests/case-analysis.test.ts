@@ -14,7 +14,7 @@ vi.mock("@/lib/documents", () => ({
   visibleCases: () => ({ firmId: "firm1" }),
 }));
 
-import { verifyAndAnnotateClaims } from "@/lib/case-analysis";
+import { verifyAndAnnotateClaims, buildAnswer } from "@/lib/case-analysis";
 import { ai, type AiCaseClaim } from "@/lib/adapters/ai";
 
 // ---------- FakeAdapter.askCase ----------
@@ -141,7 +141,7 @@ describe("verifyAndAnnotateClaims", () => {
     expect(result[0].verified).toBe(true);
   });
 
-  test("guidance claim with absent quote → kept as verified:false (unclear)", () => {
+  test("guidance claim with absent quote → dropped", () => {
     const claims: AiCaseClaim[] = [{
       claimText: "Some guidance point",
       quote: "this quote is not in the guidance text at all and never was ever written",
@@ -151,8 +151,7 @@ describe("verifyAndAnnotateClaims", () => {
     }];
     const guidanceMap = new Map([["src1:p1", "Some other guidance text about visa applications"]]);
     const result = verifyAndAnnotateClaims(claims, new Map(), guidanceMap);
-    expect(result).toHaveLength(1);
-    expect(result[0].verified).toBe(false);
+    expect(result).toHaveLength(0);
   });
 
   test("client-doc claim with unknown fileId → removed", () => {
@@ -165,6 +164,74 @@ describe("verifyAndAnnotateClaims", () => {
     }];
     const result = verifyAndAnnotateClaims(claims, new Map(), new Map());
     expect(result).toHaveLength(0);
+  });
+});
+
+// ---------- buildAnswer ----------
+
+describe("buildAnswer", () => {
+  test("no verified claims → couldn't confirm message", () => {
+    const answer = buildAnswer([], 0);
+    expect(answer).toContain("couldn't confirm");
+    expect(answer).toContain("client's documents");
+  });
+
+  test("no verified claims regardless of dropped count → couldn't confirm", () => {
+    const answer = buildAnswer([], 3);
+    expect(answer).toContain("couldn't confirm");
+  });
+
+  test("one good one bad → good claim text plus singular 'left out' note", () => {
+    const goodClaim: AiCaseClaim = {
+      claimText: "The passport is valid until 2030",
+      quote: "passport expires 2030",
+      kind: "client-document",
+      fileId: "f1",
+      pageNumber: 2,
+      verified: true,
+    };
+    const answer = buildAnswer([goodClaim], 1);
+    expect(answer).toContain("The passport is valid until 2030");
+    expect(answer).toContain("(page 2)");
+    expect(answer).toContain("1 statement couldn't be matched");
+    expect(answer).toContain("left out");
+  });
+
+  test("two good claims → both sentences joined, no 'left out' note", () => {
+    const claims: AiCaseClaim[] = [
+      { claimText: "English test passed", quote: "b1 level achieved", kind: "client-document", fileId: "f1", pageNumber: 1, verified: true },
+      { claimText: "Salary meets threshold", quote: "salary 30000", kind: "client-document", fileId: "f2", pageNumber: 3, verified: true },
+    ];
+    const answer = buildAnswer(claims, 0);
+    expect(answer).toContain("English test passed");
+    expect(answer).toContain("Salary meets threshold");
+    expect(answer).not.toContain("couldn't be matched");
+  });
+
+  test("guidance claim → cite uses locator", () => {
+    const claim: AiCaseClaim = {
+      claimText: "Minimum salary is £26,200",
+      quote: "minimum salary requirement",
+      kind: "guidance",
+      sourceId: "src1",
+      locator: "para-4",
+      verified: true,
+    };
+    const answer = buildAnswer([claim], 0);
+    expect(answer).toContain("(para-4)");
+  });
+
+  test("plural form when 2+ statements dropped", () => {
+    const claim: AiCaseClaim = {
+      claimText: "Some requirement",
+      quote: "some text",
+      kind: "client-document",
+      fileId: "f1",
+      pageNumber: 1,
+      verified: true,
+    };
+    const answer = buildAnswer([claim], 2);
+    expect(answer).toContain("2 statements couldn't be matched");
   });
 });
 
