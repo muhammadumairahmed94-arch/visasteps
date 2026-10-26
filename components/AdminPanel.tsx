@@ -211,6 +211,11 @@ function Firm({ data, run }: { data: AdminView; run: Run }) {
           <input id="f-days" name="reviewDays" type="number" className="input" min="1" max="30" defaultValue={data.firm.reviewDays} required aria-describedby="f-days-hint" />
           <p id="f-days-hint" className="hint">Clients see: &ldquo;Your caseworker usually checks documents within N working days.&rdquo;</p>
         </div>
+        <div className="field">
+          <label htmlFor="f-grm">Guidance review period (months)</label>
+          <input id="f-grm" name="guidanceReviewMonths" type="number" className="input" min="1" max="24" defaultValue={data.firm.guidanceReviewMonths} required aria-describedby="f-grm-hint" />
+          <p id="f-grm-hint" className="hint">Guidance sources not reviewed within this many months are flagged as out of date.</p>
+        </div>
         {data.firm.aiProviderAvailable && (
           <label className="check">
             <input type="checkbox" name="aiEnabled" defaultChecked={data.firm.aiEnabled} /> AI document analysis (beta) — let caseworkers run an AI check on a document

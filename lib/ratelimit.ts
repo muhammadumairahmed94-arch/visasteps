@@ -25,6 +25,7 @@ export const LIMITS = {
   messageNotifyStaff:  { max: 1, window: 15 * MIN },   // per case: email notifications to caseworker (reset on read)
   sponsorInvite:       { max: 10, window: 60 * MIN },  // per case: sponsor invite/resend attempts
   aiAnalyse:           { max: 60, window: 60 * MIN },  // per staff user: AI document analysis
+  guidanceUpload:      { max: 20, window: 60 * MIN },  // per admin user: guidance file uploads
 } as const;
 
 export type LimitName = keyof typeof LIMITS;

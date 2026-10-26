@@ -21,7 +21,7 @@ export async function adminView(admin: User) {
   ]);
   return {
     me: admin.id,
-    firm: { name: firm.name, phone: firm.phone, whatsapp: firm.whatsapp ?? "", reviewDays: firm.reviewDays, aiEnabled: firm.aiEnabled, aiProviderAvailable: (process.env.AI_PROVIDER ?? "off") !== "off" },
+    firm: { name: firm.name, phone: firm.phone, whatsapp: firm.whatsapp ?? "", reviewDays: firm.reviewDays, guidanceReviewMonths: firm.guidanceReviewMonths, aiEnabled: firm.aiEnabled, aiProviderAvailable: (process.env.AI_PROVIDER ?? "off") !== "off" },
     storage: {
       provider: process.env.STORAGE_PROVIDER ?? "fake",
       account: conn?.account ?? null,
@@ -57,6 +57,7 @@ const FirmInput = z.object({
   phone: z.string().trim().min(5, "Enter a phone number").max(40),
   whatsapp: z.string().trim().max(20).regex(/^\d*$/, "WhatsApp: digits only, with country code, e.g. 923341161664"),
   reviewDays: z.coerce.number().int().min(1, "Enter at least 1 day").max(30, "Enter 30 days or fewer").default(2),
+  guidanceReviewMonths: z.coerce.number().int().min(1, "Enter at least 1 month").max(24, "Enter 24 months or fewer").default(3),
   aiEnabled: z.boolean().optional(),
 });
 

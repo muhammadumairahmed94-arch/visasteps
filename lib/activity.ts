@@ -82,6 +82,13 @@ export const TEXT: Record<string, string> = {
   "admin.item.remove": "Checklist item removed",
   "checklist.assignedTo.CLIENT": "Checklist item set to uploaded by client",
   "checklist.assignedTo.SPONSOR": "Checklist item set to uploaded by partner",
+  // Guidance library
+  "guidance.upload":      "Guidance source uploaded",
+  "guidance.supersede":   "Guidance source superseded by new version",
+  "guidance.review":      "Guidance source marked as reviewed",
+  "guidance.type.add":    "Expected guidance type added",
+  "guidance.type.remove": "Expected guidance type removed",
+  "guidance.owner.set":   "Route guidance owner set",
 };
 
 /** Recent audit entries for one client, in plain words, newest first. Scoped to the caller's firm. */

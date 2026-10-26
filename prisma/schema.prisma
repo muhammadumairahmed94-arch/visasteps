@@ -36,44 +36,55 @@ enum CaseStage {
   DECISION   // Awaiting decision
 }
 
+enum GuidanceStatus {
+  ACTIVE
+  SUPERSEDED
+}
+
 model Firm {
-  id             String     @id @default(cuid())
-  name           String
-  phone          String
-  whatsapp       String? // digits only, for wa.me links
-  oneDriveConfig Json?
-  nextCaseNumber Int        @default(1000)
-  reviewDays     Int        @default(2)
-  aiEnabled      Boolean    @default(false)
-  createdAt      DateTime   @default(now())
-  users          User[]
-  clients        Client[]
-  routes         Route[]
-  auditLogs      AuditLog[]
+  id                   String               @id @default(cuid())
+  name                 String
+  phone                String
+  whatsapp             String? // digits only, for wa.me links
+  oneDriveConfig       Json?
+  nextCaseNumber       Int                  @default(1000)
+  reviewDays           Int                  @default(2)
+  aiEnabled            Boolean              @default(false)
+  guidanceReviewMonths Int                  @default(3)
+  createdAt            DateTime             @default(now())
+  users                User[]
+  clients              Client[]
+  routes               Route[]
+  auditLogs            AuditLog[]
+  guidanceSources      GuidanceSource[]
+  guidanceSourceTypes  GuidanceSourceType[]
 }
 
 model User {
-  id            String    @id @default(cuid())
-  firmId        String
-  firm          Firm      @relation(fields: [firmId], references: [id])
-  role          Role      @default(CASEWORKER)
-  name          String
-  email         String    @unique
-  passwordHash  String?
+  id                  String           @id @default(cuid())
+  firmId              String
+  firm                Firm             @relation(fields: [firmId], references: [id])
+  role                Role             @default(CASEWORKER)
+  name                String
+  email               String           @unique
+  passwordHash        String?
   // Authenticator-app 2FA. The secret is encrypted with AUTH_SECRET.
-  totpSecret    String?
-  totpEnabledAt DateTime?
-  totpLastStep  Int? // last accepted 30-second step, so a code cannot be reused
-  recoveryCodes String[] // hashed, single use
-  failedLogins  Int       @default(0)
-  disabledAt    DateTime? // removed from the team: cannot sign in, history kept
-  lockedUntil   DateTime?
-  ssoId         String?
-  createdAt     DateTime  @default(now())
-  clients       Client[]
-  sessions      Session[]
-  invites       Invite[]
-  messages      Message[]
+  totpSecret          String?
+  totpEnabledAt       DateTime?
+  totpLastStep        Int? // last accepted 30-second step, so a code cannot be reused
+  recoveryCodes       String[] // hashed, single use
+  failedLogins        Int              @default(0)
+  disabledAt          DateTime? // removed from the team: cannot sign in, history kept
+  lockedUntil         DateTime?
+  ssoId               String?
+  createdAt           DateTime         @default(now())
+  clients             Client[]
+  sessions            Session[]
+  invites             Invite[]
+  messages            Message[]
+  guidanceUploaded    GuidanceSource[] @relation("guidance_uploaded_by")
+  guidanceReviewed    GuidanceSource[] @relation("guidance_reviewed_by")
+  guidanceOwnerRoutes Route[]          @relation("guidance_route_owner")
 }
 
 model Client {
@@ -118,14 +129,18 @@ model Client {
 }
 
 model Route {
-  id           String          @id @default(cuid())
-  firmId       String
-  firm         Firm            @relation(fields: [firmId], references: [id])
-  name         String
+  id               String                  @id @default(cuid())
+  firmId           String
+  firm             Firm                    @relation(fields: [firmId], references: [id])
+  name             String
   // Folders created for every case on this route that hold no checklist items
-  extraFolders String[]
-  items        ChecklistItem[]
-  clients      Client[]
+  extraFolders     String[]
+  items            ChecklistItem[]
+  clients          Client[]
+  guidanceOwnerId  String?
+  guidanceOwner    User?                   @relation("guidance_route_owner", fields: [guidanceOwnerId], references: [id], onDelete: SetNull)
+  guidanceTypes    GuidanceSourceType[]
+  guidanceSources  GuidanceSourceOnRoute[]
 
   @@unique([firmId, name])
 }
@@ -342,4 +357,62 @@ model Message {
   readAt     DateTime?
 
   @@index([clientId])
+}
+
+/**
+ * Official gov.uk guidance uploaded by admins for staff reference.
+ * HTML files have extractedText for AI/display; original served as download only.
+ * Stored under Guidance/{firmId}/ in OneDrive, never inside client folders.
+ */
+model GuidanceSource {
+  id                String                  @id @default(cuid())
+  firmId            String
+  firm              Firm                    @relation(fields: [firmId], references: [id])
+  title             String
+  govukUrl          String
+  publishedAt       DateTime?
+  lastUpdatedAt     DateTime?
+  oneDriveItemId    String
+  webUrl            String?
+  sizeBytes         Int
+  mimeType          String                  // "application/pdf" | "text/html"
+  fileName          String
+  extractedText     String?                 // HTML only: plain text after stripping tags
+  uploadedById      String
+  uploadedBy        User                    @relation("guidance_uploaded_by", fields: [uploadedById], references: [id])
+  uploadedAt        DateTime                @default(now())
+  lastReviewedAt    DateTime?
+  lastReviewedById  String?
+  lastReviewedBy    User?                   @relation("guidance_reviewed_by", fields: [lastReviewedById], references: [id])
+  status            GuidanceStatus          @default(ACTIVE)
+  previousVersionId String?
+  previousVersion   GuidanceSource?         @relation("guidance_versions", fields: [previousVersionId], references: [id])
+  newerVersions     GuidanceSource[]        @relation("guidance_versions")
+  typeId            String?
+  type              GuidanceSourceType?     @relation(fields: [typeId], references: [id])
+  routes            GuidanceSourceOnRoute[]
+
+  @@index([firmId, status])
+}
+
+/** An expected source type per route (e.g. "Main appendix", "Evidence rules"). */
+model GuidanceSourceType {
+  id       String           @id @default(cuid())
+  firmId   String
+  routeId  String
+  name     String
+  order    Int              @default(0)
+  firm     Firm             @relation(fields: [firmId], references: [id])
+  route    Route            @relation(fields: [routeId], references: [id])
+  sources  GuidanceSource[]
+}
+
+/** Many-to-many: one guidance source can cover multiple visa routes. */
+model GuidanceSourceOnRoute {
+  sourceId String
+  routeId  String
+  source   GuidanceSource @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+  route    Route          @relation(fields: [routeId], references: [id])
+
+  @@id([sourceId, routeId])
 }
