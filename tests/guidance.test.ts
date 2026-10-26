@@ -116,11 +116,17 @@ vi.mock("@/lib/virus", () => ({
 
 vi.mock("@/lib/audit", () => ({ audit: vi.fn() }));
 
+const mockDetectKind = vi.fn();
+vi.mock("@/lib/files", () => ({
+  detectKind: (...a: unknown[]) => mockDetectKind(...a),
+}));
+
 const ADMIN = { id: "admin1", firmId: "firm1", role: "ADMIN" } as Parameters<typeof import("@/lib/guidance").uploadGuidance>[0];
+// Buffer starts with PDF magic bytes so mockDetectKind can return "pdf"
 const PDF_FILE = {
   name: "guidance.pdf",
   mimeType: "application/pdf",
-  buffer: Buffer.from("PDF content"),
+  buffer: Buffer.from("%PDF-1.4 minimal content"),
 };
 const VALID_META = {
   title: "Appendix FM guidance",
@@ -135,6 +141,11 @@ describe("uploadGuidance", () => {
     mockScan.mockResolvedValue({ clean: true });
     mockSave.mockResolvedValue({ itemId: "onedrive123", webUrl: null });
     mockCreate.mockResolvedValue({ id: "src1" });
+    // By default, PDF_FILE buffer is detected as "pdf"
+    mockDetectKind.mockImplementation((buf: Buffer) => {
+      const s = buf.toString("ascii", 0, 5);
+      return Promise.resolve(s === "%PDF-" ? "pdf" : null);
+    });
   });
 
   it("rejects a non-gov.uk URL", async () => {
@@ -146,8 +157,9 @@ describe("uploadGuidance", () => {
 
   it("rejects a file that is not PDF or HTML", async () => {
     const { uploadGuidance } = await import("@/lib/guidance");
+    // Buffer is random text — detectKind returns null and it doesn't look like HTML
     await expect(
-      uploadGuidance(ADMIN, { ...PDF_FILE, mimeType: "application/msword" }, VALID_META)
+      uploadGuidance(ADMIN, { ...PDF_FILE, buffer: Buffer.from("random binary content"), mimeType: "application/msword" }, VALID_META)
     ).rejects.toThrow(/PDF.*HTML|HTML.*PDF/i);
   });
 

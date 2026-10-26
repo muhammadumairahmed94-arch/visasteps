@@ -364,6 +364,12 @@ function SourceCard({
         <div style={{ flex: 1 }}>
           <strong>{source.title}</strong>
           {typeName && <span className="muted" style={{ marginLeft: "0.5rem", fontSize: "0.85rem" }}>({typeName})</span>}
+          {source.status === "SUPERSEDED" && (
+            <p style={{ marginTop: "0.25rem", fontSize: "0.85rem", color: "var(--muted, #666)" }}>
+              Superseded on {fmtDate(source.supersededBy?.uploadedAt ?? source.uploadedAt)}
+              {source.supersededBy && <> — replaced by &ldquo;{source.supersededBy.title}&rdquo;</>}
+            </p>
+          )}
           {source.stale && (
             <p className="error" style={{ marginTop: "0.25rem", fontSize: "0.85rem" }}>
               ⚠ Last checked over {reviewMonths} month{reviewMonths === 1 ? "" : "s"} ago —{" "}

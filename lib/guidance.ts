@@ -4,10 +4,10 @@ import { db } from "./db";
 import { audit } from "./audit";
 import { storage, cleanSegment } from "./adapters/storage";
 import { scan, scanningEnabled } from "./virus";
+import { detectKind } from "./files";
 import { UserError } from "./errors";
 
 const MAX_BYTES = 50 * 1024 * 1024;
-const ALLOWED_MIMES = new Set(["application/pdf", "text/html"]);
 
 /** Strip scripts, styles and all HTML tags; decode basic entities; collapse whitespace. */
 export function extractHtmlText(html: string): string {
@@ -64,19 +64,35 @@ export interface GuidanceFile {
 
 /* ---------- helpers ---------- */
 
-async function validateFile(file: GuidanceFile): Promise<void> {
-  if (!ALLOWED_MIMES.has(file.mimeType)) {
+/** Detect MIME type from file contents; never trusts the browser-supplied type. */
+async function detectGuidanceMime(buffer: Buffer): Promise<string> {
+  const kind = await detectKind(buffer);
+  if (kind === "pdf") return "application/pdf";
+  if (kind !== null) {
+    // A known binary format (image, etc.) — not accepted
     throw new UserError("Only PDF and HTML files are accepted. Best: on the gov.uk page, use Print → Save as PDF.");
   }
+  // kind is null: file-type couldn't identify a binary signature. Check for HTML.
+  const peek = buffer.slice(0, 4096).toString("utf8").replace(/^﻿/, "").trimStart().toLowerCase();
+  if (peek.startsWith("<!doctype") || peek.startsWith("<html") || peek.startsWith("<?xml")) {
+    return "text/html";
+  }
+  throw new UserError("Only PDF and HTML files are accepted. Best: on the gov.uk page, use Print → Save as PDF.");
+}
+
+/** Validate file and return the content-detected MIME type. */
+async function validateFile(file: GuidanceFile): Promise<string> {
   if (file.buffer.length > MAX_BYTES) {
     throw new UserError("File must be 50 MB or smaller.");
   }
+  const mimeType = await detectGuidanceMime(file.buffer);
   if (scanningEnabled()) {
     const result = await scan(file.buffer).catch(() => {
       throw new UserError("Virus scanner is not available right now. Please try again shortly.");
     });
     if (!result.clean) throw new UserError("This file was blocked because it may contain a virus. Please contact support if you believe this is a mistake.");
   }
+  return mimeType;
 }
 
 async function validateRoutes(firmId: string, routeIds: string[]): Promise<void> {
@@ -98,9 +114,9 @@ export async function uploadGuidance(admin: User, file: GuidanceFile, rawMeta: u
   const meta = v.data;
 
   await validateRoutes(admin.firmId, meta.routeIds);
-  await validateFile(file);
+  const mimeType = await validateFile(file);
 
-  const extractedText = file.mimeType === "text/html" ? extractHtmlText(file.buffer.toString("utf8")) : null;
+  const extractedText = mimeType === "text/html" ? extractHtmlText(file.buffer.toString("utf8")) : null;
   const { itemId, webUrl } = await storeFile(admin.firmId, file);
 
   const source = await db.guidanceSource.create({
@@ -113,7 +129,7 @@ export async function uploadGuidance(admin: User, file: GuidanceFile, rawMeta: u
       oneDriveItemId: itemId,
       webUrl: webUrl ?? null,
       sizeBytes: file.buffer.length,
-      mimeType: file.mimeType,
+      mimeType,
       fileName: file.name,
       extractedText,
       uploadedById: admin.id,
@@ -137,9 +153,9 @@ export async function supersedeGuidance(admin: User, oldId: string, file: Guidan
   if (!old) throw new UserError("This guidance source could not be found or is already superseded.");
 
   await validateRoutes(admin.firmId, meta.routeIds);
-  await validateFile(file);
+  const mimeType = await validateFile(file);
 
-  const extractedText = file.mimeType === "text/html" ? extractHtmlText(file.buffer.toString("utf8")) : null;
+  const extractedText = mimeType === "text/html" ? extractHtmlText(file.buffer.toString("utf8")) : null;
   const { itemId, webUrl } = await storeFile(admin.firmId, file);
 
   const [newSource] = await db.$transaction([
@@ -153,7 +169,7 @@ export async function supersedeGuidance(admin: User, oldId: string, file: Guidan
         oneDriveItemId: itemId,
         webUrl: webUrl ?? null,
         sizeBytes: file.buffer.length,
-        mimeType: file.mimeType,
+        mimeType,
         fileName: file.name,
         extractedText,
         uploadedById: admin.id,
@@ -227,7 +243,7 @@ export async function setGuidanceOwner(admin: User, routeId: string, userId: str
 
 export async function readGuidanceFile(staff: User, sourceId: string) {
   const source = await db.guidanceSource.findFirst({
-    where: { id: sourceId, firmId: staff.firmId, status: "ACTIVE" },
+    where: { id: sourceId, firmId: staff.firmId, status: { in: ["ACTIVE", "SUPERSEDED"] } },
     select: { oneDriveItemId: true, mimeType: true, fileName: true },
   });
   if (!source) return null;
@@ -252,6 +268,11 @@ export async function guidanceView(staff: User) {
             include: {
               uploadedBy: { select: { name: true } },
               lastReviewedBy: { select: { name: true } },
+              newerVersions: {
+                take: 1,
+                orderBy: { uploadedAt: "asc" },
+                select: { title: true, uploadedAt: true },
+              },
             },
           },
         },
@@ -285,6 +306,9 @@ export async function guidanceView(staff: User) {
         status: s.status as "ACTIVE" | "SUPERSEDED",
         typeId: s.typeId,
         previousVersionId: s.previousVersionId,
+        supersededBy: s.newerVersions[0]
+          ? { title: s.newerVersions[0].title, uploadedAt: s.newerVersions[0].uploadedAt.toISOString() }
+          : null,
         uploadedAt: s.uploadedAt.toISOString(),
         lastReviewedAt: s.lastReviewedAt?.toISOString() ?? null,
         uploadedBy: s.uploadedBy.name,

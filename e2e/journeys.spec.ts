@@ -60,6 +60,9 @@ let adminTotpKey = "";
  */
 let sharedStaffPage: Page;
 
+/** Caseworker page captured after test 4 creates sara.cw@example.com. */
+let saraCwPage: Page;
+
 /** Admin sign-in including first-time authenticator setup (the test plays the phone app). */
 async function staffSignIn(browser: Browser): Promise<{ ctx: BrowserContext; page: Page }> {
   const ctx = await browser.newContext();
@@ -236,6 +239,7 @@ test.describe.serial("main journeys", () => {
     await sara.getByRole("button", { name: "Continue" }).click();
     await expect(sara.getByRole("heading", { name: "Clients" })).toBeVisible();
     await expect(sara.getByText("No clients yet.")).toBeVisible(); // caseworkers see only their own clients
+    saraCwPage = sara; // shared for guidance-library tests
 
     // Add a document to the spouse visa checklist; existing clients are asked for it too
     await staff.goto("/staff#admin/checklists");
@@ -924,5 +928,104 @@ test.describe.serial("sponsor — email routing", () => {
     // Sponsor receives the reply email — not the main client
     const sponsorMail = await mailTo(sponsorEmail, /caseworker left a note/);
     expect(sponsorMail.to).toBe(sponsorEmail);
+  });
+});
+
+test.describe.serial("guidance library", () => {
+  test("G1. caseworker can view guidance; gets 403 from all admin guidance routes", async ({ playwright }) => {
+    // Caseworker navigates to guidance screen
+    await saraCwPage.goto("/staff");
+    await saraCwPage.getByRole("button", { name: "Guidance library" }).click();
+    await expect(saraCwPage.getByRole("heading", { name: "Guidance library" })).toBeVisible();
+
+    // Unauthenticated requests to admin guidance endpoints must return 403
+    const anon = await playwright.request.newContext({ baseURL: E2E.APP_URL, extraHTTPHeaders: { Origin: E2E.APP_URL } });
+
+    // POST /api/admin/guidance
+    const upload = await anon.post("/api/admin/guidance", { multipart: { title: "x" } });
+    expect(upload.status()).toBe(403);
+
+    // POST /api/admin/guidance/{id}/supersede
+    const supersede = await anon.post("/api/admin/guidance/nonexistent/supersede", { multipart: { title: "x" } });
+    expect(supersede.status()).toBe(403);
+
+    // POST /api/admin/guidance/{id}/review
+    const review = await anon.post("/api/admin/guidance/nonexistent/review");
+    expect(review.status()).toBe(403);
+
+    await anon.dispose();
+  });
+
+  test("G2. admin uploads, supersedes and marks reviewed; HTML source downloads", async () => {
+    // PDF bytes that pass content-based MIME detection (%PDF magic bytes)
+    const pdfBuf = Buffer.from("%PDF-1.4 e2e-test-guidance-pdf");
+    const htmlBuf = Buffer.from("<!DOCTYPE html><html><body>E2E test guidance</body></html>");
+    const mutHeaders = { Origin: E2E.APP_URL };
+
+    // ── get a route ID ────────────────────────────────────────────────────
+    const viewRes = await sharedStaffPage.request.get("/api/staff/guidance");
+    expect(viewRes.status()).toBe(200);
+    const view = await viewRes.json() as { routes: { id: string }[] };
+    expect(view.routes.length).toBeGreaterThan(0);
+    const routeId = view.routes[0].id;
+
+    // ── upload a PDF source ───────────────────────────────────────────────
+    const uploadRes = await sharedStaffPage.request.post("/api/admin/guidance", {
+      headers: mutHeaders,
+      multipart: {
+        title: "E2E guidance PDF",
+        govukUrl: "https://www.gov.uk/guidance/e2e-test",
+        routeIds: routeId,
+        file: { name: "e2e.pdf", mimeType: "application/pdf", buffer: pdfBuf },
+      },
+    });
+    expect(uploadRes.status()).toBe(200);
+    const { id: sourceId } = await uploadRes.json() as { id: string };
+    expect(typeof sourceId).toBe("string");
+
+    // ── mark reviewed ─────────────────────────────────────────────────────
+    const reviewRes = await sharedStaffPage.request.post(`/api/admin/guidance/${sourceId}/review`, { headers: mutHeaders });
+    expect(reviewRes.status()).toBe(200);
+
+    // ── supersede with a new PDF version ──────────────────────────────────
+    const supersedeRes = await sharedStaffPage.request.post(`/api/admin/guidance/${sourceId}/supersede`, {
+      headers: mutHeaders,
+      multipart: {
+        title: "E2E guidance PDF v2",
+        govukUrl: "https://www.gov.uk/guidance/e2e-test",
+        routeIds: routeId,
+        file: { name: "e2e-v2.pdf", mimeType: "application/pdf", buffer: pdfBuf },
+      },
+    });
+    expect(supersedeRes.status()).toBe(200);
+    const { id: newId } = await supersedeRes.json() as { id: string };
+
+    // Superseded source is still openable by staff (any role)
+    const openOld = await sharedStaffPage.request.get(`/api/staff/guidance/${sourceId}`);
+    expect(openOld.status()).toBe(200);
+
+    // ── upload an HTML source ─────────────────────────────────────────────
+    const htmlRes = await sharedStaffPage.request.post("/api/admin/guidance", {
+      headers: mutHeaders,
+      multipart: {
+        title: "E2E guidance HTML",
+        govukUrl: "https://www.gov.uk/guidance/e2e-test",
+        routeIds: routeId,
+        file: { name: "e2e.html", mimeType: "text/html", buffer: htmlBuf },
+      },
+    });
+    expect(htmlRes.status()).toBe(200);
+    const { id: htmlId } = await htmlRes.json() as { id: string };
+
+    // HTML source must be served with Content-Disposition: attachment (never inline)
+    const htmlOpen = await sharedStaffPage.request.get(`/api/staff/guidance/${htmlId}`);
+    expect(htmlOpen.status()).toBe(200);
+    const disposition = htmlOpen.headers()["content-disposition"] ?? "";
+    expect(disposition).toMatch(/^attachment/);
+    expect(htmlOpen.headers()["content-type"]).toMatch(/^application\/octet-stream/);
+
+    // Caseworker can also open the new active PDF source
+    const cwOpen = await saraCwPage.request.get(`/api/staff/guidance/${newId}`);
+    expect(cwOpen.status()).toBe(200);
   });
 });
