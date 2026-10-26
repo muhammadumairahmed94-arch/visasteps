@@ -89,6 +89,9 @@ export const TEXT: Record<string, string> = {
   "guidance.type.add":    "Expected guidance type added",
   "guidance.type.remove": "Expected guidance type removed",
   "guidance.owner.set":   "Route guidance owner set",
+  // Case analysis
+  "case.analyse":          "AI analysis question asked",
+  "case.analysis.delete":  "AI analysis question deleted",
   // Requirements
   "requirement.draft":             "Requirements draft started",
   "requirement.edit":              "Draft requirement edited",

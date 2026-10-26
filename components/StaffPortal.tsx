@@ -7,9 +7,11 @@ import AdminPanel from "./AdminPanel";
 import GuidancePanel from "./GuidancePanel";
 import RequirementsPanel from "./RequirementsPanel";
 import MessageThread from "./MessageThread";
+import AnalyseTab from "./AnalyseTab";
+import type { AnalysisView } from "@/lib/case-analysis";
 import { STAFF_LABEL, Page, Row, StatusPill, Tabs, api, useHashView, useToast, type Status } from "./ui";
 
-type Tab = "review" | "missing" | "folders" | "client" | "messages";
+type Tab = "review" | "missing" | "folders" | "client" | "messages" | "analyse";
 type AdminTab = "team" | "firm" | "checklists";
 type View = { screen: "list" } | { screen: "new" } | { screen: "admin"; tab: AdminTab } | { screen: "guidance" } | { screen: "requirements" } | { screen: "case"; id: string; tab: Tab; group?: string; doc?: string };
 type Home = {
@@ -21,7 +23,7 @@ type Home = {
 };
 type Doc = StaffCaseView["groups"][number]["docs"][number] & { status: Status };
 
-const TABS: Tab[] = ["review", "missing", "folders", "client", "messages"];
+const TABS: Tab[] = ["review", "missing", "folders", "client", "messages", "analyse"];
 const parse = (h: string): View => {
   const [a, id, tab, kind, x] = h.split("/");
   if (a === "new") return { screen: "new" };
@@ -243,6 +245,7 @@ function CaseView({
   const [data, setData] = useState<StaffCaseView | null>(null);
   const [missing, setMissing] = useState(false);
   const [unread, setUnread] = useState(0);
+  const [analyseView, setAnalyseView] = useState<AnalysisView | null>(null);
   const load = useCallback(
     () =>
       api<StaffCaseView>(`/api/staff/cases/${view.id}`).then((r) => {
@@ -253,9 +256,19 @@ function CaseView({
       }),
     [view.id],
   );
+  const loadAnalyse = useCallback(
+    () =>
+      api<AnalysisView>(`/api/staff/cases/${view.id}/analysis`).then((r) => {
+        if (r.ok) setAnalyseView(r.data);
+      }),
+    [view.id],
+  );
   useEffect(() => {
     void load();
   }, [load]);
+  useEffect(() => {
+    if (view.tab === "analyse") void loadAnalyse();
+  }, [view.tab, loadAnalyse]);
 
   if (missing)
     return (
@@ -347,6 +360,17 @@ function CaseView({
         onRead={() => setUnread(0)}
       />
     );
+  else if (view.tab === "analyse")
+    body = analyseView ? (
+      <AnalyseTab
+        clientId={view.id}
+        view={analyseView}
+        onRefresh={() => void loadAnalyse()}
+        toast={toast}
+      />
+    ) : (
+      <p className="muted" role="status">Loading…</p>
+    );
   else
     body = (
       <div className="detail">
@@ -432,6 +456,7 @@ function CaseView({
           ["folders", "Folders"],
           ["client", "Client"],
           ["messages", unread > 0 ? `Messages (${unread})` : "Messages"],
+          ...(data.aiEnabled ? [["analyse", "Analyse"] as [Tab, string]] : []),
         ]}
         value={view.tab}
         onChange={(t) => go({ screen: "case", id: view.id, tab: t })}

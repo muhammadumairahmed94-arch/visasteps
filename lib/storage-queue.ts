@@ -8,6 +8,7 @@ import { GraphAuthLost, type GraphStorage } from "./adapters/graph";
 import { getConnection } from "./onedrive-connection";
 import { notifyOps } from "./alerts";
 import { OLD_VERSIONS } from "./naming";
+import { deleteFilePages } from "./case-analysis";
 
 /**
  * Saving to OneDrive / SharePoint, with a safety net. Each file is saved straight away if Microsoft answers.
@@ -54,9 +55,11 @@ export async function moveToOldVersions(file: FileUpload) {
       db.storageJob.updateMany({ where: { fileUploadId: file.id, kind: "UPLOAD" }, data: { folderPath } }),
       db.fileUpload.update({ where: { id: file.id }, data: { folderPath, supersededAt: new Date() } }),
     ]);
+    await deleteFilePages(file.id);
     return;
   }
   await db.fileUpload.update({ where: { id: file.id }, data: { supersededAt: new Date() } });
+  await deleteFilePages(file.id);
   try {
     await doMove(file, folderPath, file.storedName);
   } catch (e) {

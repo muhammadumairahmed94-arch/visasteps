@@ -195,15 +195,18 @@ export async function staffCaseList(u: User) {
 }
 
 export async function staffCaseView(u: User, clientId: string) {
-  const c = await db.client.findFirst({
-    where: { id: clientId, ...visibleCases(u) },
-    include: {
-      route: true,
-      caseworker: true,
-      documents: { include: { checklistItem: true, files: current } },
-      sponsorAccounts: { select: { id: true, email: true, sponsorLabel: true, closedAt: true, visibleToClient: true } },
-    },
-  });
+  const [c, firm] = await Promise.all([
+    db.client.findFirst({
+      where: { id: clientId, ...visibleCases(u) },
+      include: {
+        route: true,
+        caseworker: true,
+        documents: { include: { checklistItem: true, files: current } },
+        sponsorAccounts: { select: { id: true, email: true, sponsorLabel: true, closedAt: true, visibleToClient: true } },
+      },
+    }),
+    db.firm.findUniqueOrThrow({ where: { id: u.firmId }, select: { aiEnabled: true } }),
+  ]);
   if (!c) return null;
   const unreadMessages = await db.message.count({
     where: { clientId: c.id, senderKind: "CLIENT", readAt: null },
@@ -212,6 +215,7 @@ export async function staffCaseView(u: User, clientId: string) {
   const activeSponsor = c.sponsorAccounts.find((s) => !s.closedAt) ?? null;
   const docs = c.documents.filter(shown).map((d) => ({ ...d.checklistItem, doc: d }));
   return {
+    aiEnabled: firm.aiEnabled,
     client: {
       id: c.id,
       name: fullName(c),

@@ -71,26 +71,28 @@ enum RequirementStatus {
 }
 
 model Firm {
-  id                   String               @id @default(cuid())
-  name                 String
-  phone                String
-  whatsapp             String? // digits only, for wa.me links
-  oneDriveConfig       Json?
-  nextCaseNumber       Int                  @default(1000)
-  reviewDays           Int                  @default(2)
-  aiEnabled            Boolean              @default(false)
-  guidanceReviewMonths Int                  @default(3)
-  createdAt            DateTime             @default(now())
-  users                User[]
-  clients              Client[]
-  routes               Route[]
-  auditLogs            AuditLog[]
-  guidanceSources      GuidanceSource[]
-  guidanceSourceTypes  GuidanceSourceType[]
-  draftRuns            DraftRun[]
-  requirements         Requirement[]
-  mentionedSources     MentionedSource[]
-  checklistSuggestions ChecklistSuggestion[]
+  id                      String               @id @default(cuid())
+  name                    String
+  phone                   String
+  whatsapp                String? // digits only, for wa.me links
+  oneDriveConfig          Json?
+  nextCaseNumber          Int                  @default(1000)
+  reviewDays              Int                  @default(2)
+  aiEnabled               Boolean              @default(false)
+  analysisHistoryEnabled  Boolean              @default(true)
+  guidanceReviewMonths    Int                  @default(3)
+  createdAt               DateTime             @default(now())
+  users                   User[]
+  clients                 Client[]
+  routes                  Route[]
+  auditLogs               AuditLog[]
+  guidanceSources         GuidanceSource[]
+  guidanceSourceTypes     GuidanceSourceType[]
+  draftRuns               DraftRun[]
+  requirements            Requirement[]
+  mentionedSources        MentionedSource[]
+  checklistSuggestions    ChecklistSuggestion[]
+  aiQuestions             AiQuestion[]
 }
 
 model User {
@@ -120,6 +122,7 @@ model User {
   guidanceOwnerRoutes  Route[]          @relation("guidance_route_owner")
   initiatedDraftRuns   DraftRun[]       @relation("draft_run_initiated_by")
   reviewedRequirements Requirement[]    @relation("requirement_reviewed_by")
+  aiQuestionsAsked     AiQuestion[]     @relation("ai_question_asked_by")
 }
 
 model Client {
@@ -159,6 +162,7 @@ model Client {
   signInCodes      SignInCode[]
   uploadSessions   UploadSession[]
   messages         Message[]
+  aiQuestions      AiQuestion[]
 
   @@unique([firmId, caseRef])
   @@index([sponsorForClientId])
@@ -240,6 +244,7 @@ model FileUpload {
   supersededAt     DateTime?
   uploaderKind     String         @default("CLIENT") // "CLIENT" | "SPONSOR"
   jobs             StorageJob[]
+  pages            ClientFilePage[]
 }
 
 enum LinkKind {
@@ -395,6 +400,37 @@ model Message {
   readAt     DateTime?
 
   @@index([clientId])
+}
+
+/** Cached extracted text per page of a client file upload. Cleared when the file is superseded. */
+model ClientFilePage {
+  id            String     @id @default(cuid())
+  fileId        String
+  file          FileUpload @relation(fields: [fileId], references: [id], onDelete: Cascade)
+  pageNumber    Int
+  encryptedText String?
+  isImage       Boolean    @default(false)
+  createdAt     DateTime   @default(now())
+
+  @@unique([fileId, pageNumber])
+  @@index([fileId])
+}
+
+/** Encrypted AI question and answer, stored for case history. */
+model AiQuestion {
+  id          String   @id @default(cuid())
+  clientId    String
+  client      Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  firmId      String
+  firm        Firm     @relation(fields: [firmId], references: [id], onDelete: Cascade)
+  askedById   String
+  askedBy     User     @relation("ai_question_asked_by", fields: [askedById], references: [id], onDelete: Cascade)
+  encryptedQ  String
+  encryptedA  String   // JSON: { answer, claims, notFound }
+  foldersUsed String[]
+  createdAt   DateTime @default(now())
+
+  @@index([clientId, createdAt])
 }
 
 /**

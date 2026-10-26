@@ -1095,3 +1095,93 @@ test.describe.serial("requirements", () => {
     expect(routeView).toBeDefined();
   });
 });
+
+test.describe.serial("analysis tab — A1/A2/A3/A4", () => {
+  const mutHeaders = { Origin: E2E.APP_URL };
+  let clientId = "";
+
+  /** Helper: update firm.aiEnabled via the admin settings endpoint. */
+  async function setAiEnabled(enabled: boolean) {
+    const adminRes = await sharedStaffPage.request.get("/api/admin");
+    const { firm } = await adminRes.json() as { firm: { name: string; phone: string; whatsapp: string; reviewDays: number; guidanceReviewMonths: number } };
+    const res = await sharedStaffPage.request.post("/api/admin/firm", {
+      headers: mutHeaders,
+      data: JSON.stringify({ ...firm, aiEnabled: enabled }),
+    });
+    expect(res.status()).toBe(200);
+  }
+
+  test.beforeAll(async () => {
+    // Find the seeded Amina Khan case (always present)
+    const casesRes = await sharedStaffPage.request.get("/api/staff/cases");
+    expect(casesRes.status()).toBe(200);
+    const casesData = await casesRes.json() as { cases: { id: string; caseRef: string }[] };
+    const amina = casesData.cases.find((c) => c.caseRef === "IM-2041");
+    expect(amina, "seeded client IM-2041 must exist").toBeTruthy();
+    clientId = amina!.id;
+
+    await setAiEnabled(true);
+  });
+
+  test.afterAll(async () => {
+    await setAiEnabled(false);
+  });
+
+  test("A1: client session gets 401 from all three analyse routes", async ({ playwright }) => {
+    const clientCtx = await playwright.request.newContext({ baseURL: E2E.APP_URL, extraHTTPHeaders: { Origin: E2E.APP_URL } });
+    await clientCtx.post("/api/auth/client/login", {
+      data: { email: "amina.khan@example.com", password: E2E.SEED_CLIENT_PASSWORD },
+    });
+
+    const [get, post, del] = await Promise.all([
+      clientCtx.get(`/api/staff/cases/${clientId}/analysis`),
+      clientCtx.post(`/api/staff/cases/${clientId}/analysis`, { data: JSON.stringify({ question: "test" }) }),
+      clientCtx.delete(`/api/staff/cases/${clientId}/analysis/fake-qid`),
+    ]);
+    expect(get.status()).toBe(401);
+    expect(post.status()).toBe(401);
+    expect(del.status()).toBe(401);
+
+    await clientCtx.dispose();
+  });
+
+  test("A2: caseworker Sara gets 404 asking about admin's client", async () => {
+    // saraCwPage belongs to Sara (a caseworker who has no clients of her own).
+    // Admin's client (Amina) is assigned to the Demo Caseworker, not Sara.
+    // So Sara's visibleCases filter excludes it → 404.
+    const res = await saraCwPage.request.post(
+      `/api/staff/cases/${clientId}/analysis`,
+      { headers: mutHeaders, data: JSON.stringify({ question: "test" }) },
+    );
+    expect(res.status()).toBe(404);
+  });
+
+  test("A3: with aiEnabled=false, GET returns view with aiEnabled:false; POST returns 400", async () => {
+    await setAiEnabled(false);
+
+    const getRes = await sharedStaffPage.request.get(`/api/staff/cases/${clientId}/analysis`);
+    expect(getRes.status()).toBe(200);
+    const viewData = await getRes.json() as { aiEnabled: boolean };
+    expect(viewData.aiEnabled).toBe(false);
+
+    const postRes = await sharedStaffPage.request.post(`/api/staff/cases/${clientId}/analysis`, {
+      headers: mutHeaders,
+      data: JSON.stringify({ question: "test" }),
+    });
+    expect(postRes.status()).toBe(400);
+
+    // Re-enable for remaining tests
+    await setAiEnabled(true);
+  });
+
+  test("A4: grounding — ##no-answer## question returns notFound:true", async () => {
+    const res = await sharedStaffPage.request.post(
+      `/api/staff/cases/${clientId}/analysis`,
+      { headers: mutHeaders, data: JSON.stringify({ question: "##no-answer## trigger grounding test" }) },
+    );
+    expect(res.status()).toBe(200);
+    const result = await res.json() as { notFound: boolean; answer: string };
+    expect(result.notFound).toBe(true);
+    expect(result.answer).toContain("not in the client");
+  });
+});
