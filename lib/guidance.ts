@@ -6,6 +6,7 @@ import { storage, cleanSegment } from "./adapters/storage";
 import { scan, scanningEnabled } from "./virus";
 import { detectKind } from "./files";
 import { UserError } from "./errors";
+import { extractAndStorePages } from "./guidance-pages";
 
 const MAX_BYTES = 50 * 1024 * 1024;
 
@@ -139,6 +140,9 @@ export async function uploadGuidance(admin: User, file: GuidanceFile, rawMeta: u
   });
 
   await audit({ firmId: admin.firmId, actorType: "USER", actorId: admin.id, action: "guidance.upload", targetId: source.id });
+  void extractAndStorePages(source.id, file.buffer, mimeType).catch((e) =>
+    console.error(`guidance-pages extraction failed for ${source.id}:`, e),
+  );
   return source.id;
 }
 
@@ -179,10 +183,18 @@ export async function supersedeGuidance(admin: User, oldId: string, file: Guidan
       },
     }),
     db.guidanceSource.update({ where: { id: oldId }, data: { status: "SUPERSEDED" } }),
+    // Archive any draft/approved requirements that cited the superseded source — they need re-review
+    db.requirement.updateMany({
+      where: { citationSourceId: oldId, archivedAt: null },
+      data: { archivedAt: new Date() },
+    }),
   ]);
 
   await audit({ firmId: admin.firmId, actorType: "USER", actorId: admin.id, action: "guidance.supersede", targetId: oldId });
   await audit({ firmId: admin.firmId, actorType: "USER", actorId: admin.id, action: "guidance.upload", targetId: newSource.id });
+  void extractAndStorePages(newSource.id, file.buffer, mimeType).catch((e) =>
+    console.error(`guidance-pages extraction failed for ${newSource.id}:`, e),
+  );
   return newSource.id;
 }
 

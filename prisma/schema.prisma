@@ -41,6 +41,35 @@ enum GuidanceStatus {
   SUPERSEDED
 }
 
+enum DraftRunStatus {
+  QUEUED
+  RUNNING
+  COMPLETE
+  FAILED
+}
+
+enum DraftSourceStatus {
+  PENDING
+  RUNNING
+  DONE
+  FAILED
+  NO_TEXT
+}
+
+enum RequirementRuleType {
+  DATE_LIMIT
+  MONEY_THRESHOLD
+  DOCUMENT_PRESENT
+  NAME_MATCH
+  OTHER
+}
+
+enum RequirementStatus {
+  DRAFT
+  APPROVED
+  REJECTED
+}
+
 model Firm {
   id                   String               @id @default(cuid())
   name                 String
@@ -58,6 +87,10 @@ model Firm {
   auditLogs            AuditLog[]
   guidanceSources      GuidanceSource[]
   guidanceSourceTypes  GuidanceSourceType[]
+  draftRuns            DraftRun[]
+  requirements         Requirement[]
+  mentionedSources     MentionedSource[]
+  checklistSuggestions ChecklistSuggestion[]
 }
 
 model User {
@@ -82,9 +115,11 @@ model User {
   sessions            Session[]
   invites             Invite[]
   messages            Message[]
-  guidanceUploaded    GuidanceSource[] @relation("guidance_uploaded_by")
-  guidanceReviewed    GuidanceSource[] @relation("guidance_reviewed_by")
-  guidanceOwnerRoutes Route[]          @relation("guidance_route_owner")
+  guidanceUploaded     GuidanceSource[] @relation("guidance_uploaded_by")
+  guidanceReviewed     GuidanceSource[] @relation("guidance_reviewed_by")
+  guidanceOwnerRoutes  Route[]          @relation("guidance_route_owner")
+  initiatedDraftRuns   DraftRun[]       @relation("draft_run_initiated_by")
+  reviewedRequirements Requirement[]    @relation("requirement_reviewed_by")
 }
 
 model Client {
@@ -142,6 +177,8 @@ model Route {
   guidanceOwner    User?                   @relation("guidance_route_owner", fields: [guidanceOwnerId], references: [id], onDelete: SetNull)
   guidanceTypes    GuidanceSourceType[]
   guidanceSources  GuidanceSourceOnRoute[]
+  draftRuns        DraftRun[]
+  requirements     Requirement[]
 
   @@unique([firmId, name])
 }
@@ -392,6 +429,117 @@ model GuidanceSource {
   typeId            String?
   type              GuidanceSourceType?     @relation(fields: [typeId], references: [id])
   routes            GuidanceSourceOnRoute[]
+  extractionWarning String?
+  pages             GuidancePage[]
+  runSources        DraftRunSource[]
+  requirements      Requirement[]           @relation("requirement_citation")
+
+  @@index([firmId, status])
+}
+
+/** One row per page (PDFs: "p1", "p2"…) or heading section (HTML). Text stored encrypted. */
+model GuidancePage {
+  id            String         @id @default(cuid())
+  sourceId      String
+  source        GuidanceSource @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+  locator       String
+  encryptedText String
+
+  @@unique([sourceId, locator])
+}
+
+/** A background run that drafts requirements from a route's active guidance sources. */
+model DraftRun {
+  id             String           @id @default(cuid())
+  firmId         String
+  firm           Firm             @relation(fields: [firmId], references: [id])
+  routeId        String
+  route          Route            @relation(fields: [routeId], references: [id])
+  initiatedById  String
+  initiatedBy    User             @relation("draft_run_initiated_by", fields: [initiatedById], references: [id])
+  status         DraftRunStatus   @default(QUEUED)
+  createdAt      DateTime         @default(now())
+  startedAt      DateTime?
+  completedAt    DateTime?
+  errorMessage   String?
+  sources        DraftRunSource[]
+  requirements   Requirement[]
+  mentionedSources MentionedSource[]
+
+  @@index([firmId, routeId, createdAt])
+  @@index([status])
+}
+
+/** Progress tracking for one guidance source within a DraftRun. */
+model DraftRunSource {
+  id                String            @id @default(cuid())
+  runId             String
+  run               DraftRun          @relation(fields: [runId], references: [id], onDelete: Cascade)
+  sourceId          String
+  source            GuidanceSource    @relation(fields: [sourceId], references: [id])
+  status            DraftSourceStatus @default(PENDING)
+  requirementsFound Int               @default(0)
+  errorMessage      String?
+}
+
+/**
+ * One compliance requirement extracted from guidance by the AI and verified by an admin.
+ * Only APPROVED requirements are used for any case work — DRAFT and REJECTED are admin-only.
+ */
+model Requirement {
+  id               String              @id @default(cuid())
+  firmId           String
+  firm             Firm                @relation(fields: [firmId], references: [id])
+  routeId          String
+  route            Route               @relation(fields: [routeId], references: [id])
+  runId            String
+  run              DraftRun            @relation(fields: [runId], references: [id])
+  whatIsChecked    String
+  ruleType         RequirementRuleType
+  limitOrThreshold String?
+  evidenceNeeded   String
+  citationSourceId String
+  citationSource   GuidanceSource      @relation("requirement_citation", fields: [citationSourceId], references: [id])
+  citationLocator  String
+  citationQuote    String
+  status           RequirementStatus   @default(DRAFT)
+  reviewedById     String?
+  reviewedBy       User?               @relation("requirement_reviewed_by", fields: [reviewedById], references: [id])
+  reviewedAt       DateTime?
+  archivedAt       DateTime?
+  suggestions      ChecklistSuggestion[]
+
+  @@index([routeId, status])
+  @@index([citationSourceId])
+  @@index([firmId, status])
+}
+
+/** A guidance document referenced in text but not yet in the library. */
+model MentionedSource {
+  id              String   @id @default(cuid())
+  firmId          String
+  firm            Firm     @relation(fields: [firmId], references: [id])
+  runId           String
+  run             DraftRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  title           String
+  url             String?
+  locator         String
+  foundInSourceId String
+
+  @@index([runId])
+}
+
+/** A checklist item suggested by an approved DOCUMENT_PRESENT requirement. Admin accepts or ignores. */
+model ChecklistSuggestion {
+  id            String      @id @default(cuid())
+  firmId        String
+  firm          Firm        @relation(fields: [firmId], references: [id])
+  requirementId String
+  requirement   Requirement @relation(fields: [requirementId], references: [id], onDelete: Cascade)
+  documentName  String
+  description   String?
+  status        String      @default("PENDING")
+  createdAt     DateTime    @default(now())
 
   @@index([firmId, status])
 }

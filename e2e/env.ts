@@ -18,4 +18,6 @@ export const E2E = {
   SEED_STAFF_PASSWORD: "e2e-caseworker-password",
   SEED_CLIENT_PASSWORD: "e2e-client-password",
   SEED_ADMIN_PASSWORD: "e2e-admin-password-long",
+  CRON_SECRET: "e2e-cron-secret-value",
+  AI_PROVIDER: "fake",
 } as const;

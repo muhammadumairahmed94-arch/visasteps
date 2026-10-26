@@ -89,6 +89,13 @@ export const TEXT: Record<string, string> = {
   "guidance.type.add":    "Expected guidance type added",
   "guidance.type.remove": "Expected guidance type removed",
   "guidance.owner.set":   "Route guidance owner set",
+  // Requirements
+  "requirement.draft":             "Requirements draft started",
+  "requirement.edit":              "Draft requirement edited",
+  "requirement.approve":           "Requirement approved",
+  "requirement.reject":            "Requirement rejected",
+  "requirement.suggestion.accept": "Checklist suggestion accepted",
+  "requirement.suggestion.ignore": "Checklist suggestion ignored",
 };
 
 /** Recent audit entries for one client, in plain words, newest first. Scoped to the caller's firm. */

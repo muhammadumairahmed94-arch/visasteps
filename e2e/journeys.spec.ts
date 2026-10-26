@@ -1029,3 +1029,69 @@ test.describe.serial("guidance library", () => {
     expect(cwOpen.status()).toBe(200);
   });
 });
+
+test.describe.serial("requirements", () => {
+  const mutHeaders = { Origin: E2E.APP_URL };
+  const cronHeaders = { Authorization: `Bearer ${E2E.CRON_SECRET}` };
+
+  test("R1: caseworker gets 403 from all admin requirements routes; staff view returns 200", async () => {
+    // Admin routes are off-limits for caseworkers
+    const gen403 = await saraCwPage.request.post("/api/admin/requirements/generate", {
+      headers: mutHeaders,
+      data: JSON.stringify({ routeId: "any" }),
+    });
+    expect(gen403.status()).toBe(403);
+
+    const patch403 = await saraCwPage.request.patch("/api/admin/requirements/fake-id", {
+      headers: mutHeaders,
+      data: JSON.stringify({ action: "approve" }),
+    });
+    expect(patch403.status()).toBe(403);
+
+    // Staff view (caseworker) returns 200
+    const viewRes = await saraCwPage.request.get("/api/staff/requirements");
+    expect(viewRes.status()).toBe(200);
+    const view = await viewRes.json() as { isAdmin: boolean; routes: unknown[] };
+    expect(view.isAdmin).toBe(false);
+    expect(Array.isArray(view.routes)).toBe(true);
+  });
+
+  test("R2: admin can create a draft run; cron processes it; run reaches a terminal state", async () => {
+    // Get a route ID from the guidance view
+    const guidanceRes = await sharedStaffPage.request.get("/api/staff/guidance");
+    const guidanceData = await guidanceRes.json() as { routes: { id: string }[] };
+    const routeId = guidanceData.routes[0]?.id;
+    expect(routeId).toBeTruthy();
+
+    // Create draft run
+    const genRes = await sharedStaffPage.request.post("/api/admin/requirements/generate", {
+      headers: mutHeaders,
+      data: JSON.stringify({ routeId }),
+    });
+    expect(genRes.status()).toBe(200);
+    const { runId } = await genRes.json() as { runId: string };
+    expect(typeof runId).toBe("string");
+
+    // Process via cron
+    const cronRes = await sharedStaffPage.request.get("/api/jobs/requirements", { headers: cronHeaders });
+    expect(cronRes.status()).toBe(200);
+
+    // Poll until run reaches a terminal state (COMPLETE or FAILED)
+    let status = "RUNNING";
+    for (let i = 0; i < 10 && !["COMPLETE", "FAILED"].includes(status); i++) {
+      await new Promise((r) => setTimeout(r, 500));
+      const pollRes = await sharedStaffPage.request.get(`/api/admin/requirements/runs/${runId}`, { headers: mutHeaders });
+      const run = await pollRes.json() as { status: string };
+      status = run.status;
+    }
+    expect(["COMPLETE", "FAILED"]).toContain(status);
+
+    // Admin requirements view includes this route
+    const viewRes = await sharedStaffPage.request.get("/api/staff/requirements");
+    expect(viewRes.status()).toBe(200);
+    const view = await viewRes.json() as { isAdmin: boolean; routes: { id: string }[] };
+    expect(view.isAdmin).toBe(true);
+    const routeView = view.routes.find((r) => r.id === routeId);
+    expect(routeView).toBeDefined();
+  });
+});

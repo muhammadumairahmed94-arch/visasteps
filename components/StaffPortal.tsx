@@ -5,12 +5,13 @@ import type { StaffCaseView } from "@/lib/documents";
 import StaffSignIn from "./StaffSignIn";
 import AdminPanel from "./AdminPanel";
 import GuidancePanel from "./GuidancePanel";
+import RequirementsPanel from "./RequirementsPanel";
 import MessageThread from "./MessageThread";
 import { STAFF_LABEL, Page, Row, StatusPill, Tabs, api, useHashView, useToast, type Status } from "./ui";
 
 type Tab = "review" | "missing" | "folders" | "client" | "messages";
 type AdminTab = "team" | "firm" | "checklists";
-type View = { screen: "list" } | { screen: "new" } | { screen: "admin"; tab: AdminTab } | { screen: "guidance" } | { screen: "case"; id: string; tab: Tab; group?: string; doc?: string };
+type View = { screen: "list" } | { screen: "new" } | { screen: "admin"; tab: AdminTab } | { screen: "guidance" } | { screen: "requirements" } | { screen: "case"; id: string; tab: Tab; group?: string; doc?: string };
 type Home = {
   me: { id: string; name: string; role: "ADMIN" | "CASEWORKER" };
   cases: { id: string; name: string; accountCreated: boolean; closed: boolean; caseRef: string; route: string; toReview: number; missing: number; unread: number }[];
@@ -26,6 +27,7 @@ const parse = (h: string): View => {
   if (a === "new") return { screen: "new" };
   if (a === "admin") return { screen: "admin", tab: (["team", "firm", "checklists"].includes(id) ? id : "team") as AdminTab };
   if (a === "guidance") return { screen: "guidance" };
+  if (a === "requirements") return { screen: "requirements" };
   if (a !== "c" || !id) return { screen: "list" };
   const t = TABS.includes(tab as Tab) ? (tab as Tab) : "review";
   return { screen: "case", id, tab: t, group: kind === "g" ? x : undefined, doc: kind === "d" ? x : undefined };
@@ -39,7 +41,9 @@ const format = (v: View) =>
         ? `admin/${v.tab}`
         : v.screen === "guidance"
           ? "guidance"
-          : "";
+          : v.screen === "requirements"
+            ? "requirements"
+            : "";
 
 export default function StaffPortal() {
   const [state, setState] = useState<"loading" | "signedOut" | "in">("loading");
@@ -111,6 +115,8 @@ export default function StaffPortal() {
     content = <AdminPanel tab={view.tab} setTab={(t) => go({ screen: "admin", tab: t })} onBack={() => (go({ screen: "list" }), void loadHome())} toast={toast} />;
   else if (view.screen === "guidance")
     content = <GuidancePanel onBack={() => go({ screen: "list" })} toast={toast} />;
+  else if (view.screen === "requirements")
+    content = <RequirementsPanel onBack={() => go({ screen: "list" })} toast={toast} />;
   else if (view.screen === "case") content = <CaseView view={view} go={go} toast={toast} onChange={loadHome} admin={home.me.role === "ADMIN"} />;
   else {
     const listed = home.cases.filter((c) => c.closed === showClosed);
@@ -123,6 +129,7 @@ export default function StaffPortal() {
         </section>
         <button type="button" className="big" onClick={() => go({ screen: "new" })}>New client</button>
         <button type="button" className="ghost" onClick={() => go({ screen: "guidance" })}>Guidance library</button>
+        <button type="button" className="ghost" onClick={() => go({ screen: "requirements" })}>Requirements</button>
         {home.me.role === "ADMIN" && (
           <button type="button" className="ghost" onClick={() => go({ screen: "admin", tab: "team" })}>Admin: team, firm details, checklists</button>
         )}

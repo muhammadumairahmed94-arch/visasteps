@@ -3,6 +3,7 @@ import { sendDueReminders } from "./reminders";
 import { purgeExpiredUploadSessions } from "./upload-sessions";
 import { backupAgeHours, backupsConfigured } from "./health";
 import { notifyOps } from "./alerts";
+import { processDraftRuns } from "./draft-runs";
 
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
@@ -18,6 +19,7 @@ export function startBackgroundJobs() {
     try {
       await keepAlive();
       await processQueue();
+      await processDraftRuns();
       if (!g.lastReminders || Date.now() - g.lastReminders > 15 * 60_000) {
         g.lastReminders = Date.now();
         const r = await sendDueReminders();
