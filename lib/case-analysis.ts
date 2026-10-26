@@ -6,7 +6,7 @@ import type { AiSource, AiCaseClaim, AiCaseResult } from "./adapters/ai";
 import { encrypt, decrypt } from "./crypto";
 import { audit } from "./audit";
 import { limit } from "./ratelimit";
-import { UserError, NotFoundError } from "./errors";
+import { NotFoundError, ForbiddenError } from "./errors";
 import { visibleCases } from "./documents";
 import { numbersInQuote } from "./draft-runs";
 
@@ -224,7 +224,7 @@ export async function askCaseQuestion(
   folderFilter?: string[],
 ): Promise<AiCaseResult> {
   const firm = await db.firm.findUniqueOrThrow({ where: { id: staff.firmId } });
-  if (!firm.aiEnabled) throw new UserError("AI analysis is not enabled for this firm.");
+  if (!firm.aiEnabled) throw new ForbiddenError("AI analysis is not enabled for this firm.");
 
   await limit("aiAnalyse", staff.id);
 
