@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 
 export interface AiSource {
+  /** Build from server-controlled data (e.g. "Client document: Passport, page 2"), not from uploaded file names. */
   label: string;
   kind: "client-document" | "guidance";
   fileId?: string;
@@ -32,13 +33,17 @@ const SYSTEM_PROMPT =
   "or illegible text — empty array if none). " +
   "Do not use any external tools or browse the web.";
 
+function cleanLabel(raw: string): string {
+  return raw.replace(/[<>"'\r\n]/g, "").trim().slice(0, 120);
+}
+
 /** Exported for unit tests — pass a fixed boundary to make assertions deterministic. */
 export function sourcesBlock(sources: AiSource[], boundary = randomBytes(8).toString("hex")): string {
   const open = `source-${boundary}`;
   const close = `/${open}`;
   return sources
     .map((s) => {
-      const meta = [`label: ${s.label}`, `kind: ${s.kind}`, ...(s.fileId ? [`fileId: ${s.fileId}`] : []), ...(s.page !== undefined ? [`page: ${s.page}`] : [])].join(", ");
+      const meta = [`label: ${cleanLabel(s.label)}`, `kind: ${s.kind}`, ...(s.fileId ? [`fileId: ${s.fileId}`] : []), ...(s.page !== undefined ? [`page: ${s.page}`] : [])].join(", ");
       const safeText = s.text.replaceAll(`<${close}>`, "");
       return `<${open} ${meta}>\n${safeText}\n<${close}>`;
     })
