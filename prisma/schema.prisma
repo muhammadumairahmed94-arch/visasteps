@@ -126,6 +126,7 @@ model Client {
   messages         Message[]
 
   @@unique([firmId, caseRef])
+  @@index([sponsorForClientId])
 }
 
 model Route {
