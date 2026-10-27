@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 const mockProcessDocCheckRuns = vi.fn().mockResolvedValue(undefined);
+const mockProcessGuidanceCheckRuns = vi.fn().mockResolvedValue(undefined);
 const mockProcessDraftRuns = vi.fn().mockResolvedValue(undefined);
 const mockKeepAlive = vi.fn().mockResolvedValue(undefined);
 const mockProcessQueue = vi.fn().mockResolvedValue(undefined);
@@ -8,6 +9,7 @@ const mockSendDueReminders = vi.fn().mockResolvedValue({ missing: 0, redo: 0 });
 const mockPurgeExpiredUploadSessions = vi.fn().mockResolvedValue(undefined);
 
 vi.mock("@/lib/doc-check-runs", () => ({ processDocCheckRuns: mockProcessDocCheckRuns }));
+vi.mock("@/lib/guidance-check-runs", () => ({ processGuidanceCheckRuns: mockProcessGuidanceCheckRuns }));
 vi.mock("@/lib/draft-runs", () => ({ processDraftRuns: mockProcessDraftRuns }));
 vi.mock("@/lib/storage-queue", () => ({ keepAlive: mockKeepAlive, processQueue: mockProcessQueue }));
 vi.mock("@/lib/reminders", () => ({ sendDueReminders: mockSendDueReminders }));
@@ -47,6 +49,15 @@ describe("startBackgroundJobs", () => {
     await vi.advanceTimersByTimeAsync(180_000); // 3 ticks
 
     expect(mockProcessDocCheckRuns).toHaveBeenCalledTimes(3);
+  });
+
+  it("calls processGuidanceCheckRuns on each tick", async () => {
+    const { startBackgroundJobs } = await import("@/lib/jobs");
+    startBackgroundJobs();
+
+    await vi.advanceTimersByTimeAsync(60_000);
+
+    expect(mockProcessGuidanceCheckRuns).toHaveBeenCalledOnce();
   });
 
   it("does not start a second timer if already running", async () => {

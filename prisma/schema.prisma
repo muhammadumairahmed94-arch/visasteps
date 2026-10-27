@@ -71,6 +71,20 @@ enum DocCheckItemStatus {
   NO_TEXT
 }
 
+enum GuidanceCheckRunStatus {
+  QUEUED
+  RUNNING
+  COMPLETE
+  FAILED
+}
+
+enum GuidanceCheckItemStatus {
+  PENDING
+  RUNNING
+  DONE
+  FAILED
+}
+
 enum RequirementRuleType {
   DATE_LIMIT
   MONEY_THRESHOLD
@@ -105,6 +119,7 @@ model Firm {
   guidanceSourceTypes     GuidanceSourceType[]
   draftRuns               DraftRun[]
   docCheckRuns            DocCheckRun[]
+  guidanceCheckRuns         GuidanceCheckRun[]
   requirements            Requirement[]
   mentionedSources        MentionedSource[]
   checklistSuggestions    ChecklistSuggestion[]
@@ -138,6 +153,7 @@ model User {
   guidanceOwnerRoutes  Route[]          @relation("guidance_route_owner")
   initiatedDraftRuns   DraftRun[]       @relation("draft_run_initiated_by")
   initiatedDocCheckRuns DocCheckRun[]   @relation("doc_check_run_initiated_by")
+  initiatedGuidanceCheckRuns GuidanceCheckRun[] @relation("guidance_check_run_initiated_by")
   reviewedRequirements Requirement[]    @relation("requirement_reviewed_by")
   aiQuestionsAsked     AiQuestion[]     @relation("ai_question_asked_by")
 }
@@ -181,6 +197,7 @@ model Client {
   messages         Message[]
   aiQuestions      AiQuestion[]
   docCheckRuns     DocCheckRun[]
+  guidanceCheckRuns  GuidanceCheckRun[]
 
   @@unique([firmId, caseRef])
   @@index([sponsorForClientId])
@@ -565,6 +582,7 @@ model Requirement {
   reviewedAt       DateTime?
   archivedAt       DateTime?
   suggestions      ChecklistSuggestion[]
+  guidanceCheckItems GuidanceCheckItem[]
 
   @@index([routeId, status])
   @@index([citationSourceId])
@@ -664,6 +682,41 @@ model DocCheckItem {
   doc             ClientDocument     @relation(fields: [docId], references: [id], onDelete: Cascade)
 
   @@unique([runId, docId])
+}
+
+/** A background run of guidance checking for one client. */
+model GuidanceCheckRun {
+  id            String               @id @default(cuid())
+  clientId      String
+  firmId        String
+  initiatedById String
+  status        GuidanceCheckRunStatus @default(QUEUED)
+  createdAt     DateTime             @default(now())
+  startedAt     DateTime?
+  completedAt   DateTime?
+
+  client        Client               @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  firm          Firm                 @relation(fields: [firmId], references: [id])
+  initiatedBy   User                 @relation("guidance_check_run_initiated_by", fields: [initiatedById], references: [id])
+  items         GuidanceCheckItem[]
+
+  @@index([clientId, createdAt])
+  @@index([status])
+}
+
+/** Result for one approved requirement within an GuidanceCheckRun. */
+model GuidanceCheckItem {
+  id              String                @id @default(cuid())
+  runId           String
+  requirementId   String
+  status          GuidanceCheckItemStatus @default(PENDING)
+  errorMessage    String?
+  encryptedResult String?               // JSON: GuidanceCheckItemResult, encrypted
+
+  run             GuidanceCheckRun        @relation(fields: [runId], references: [id], onDelete: Cascade)
+  requirement     Requirement           @relation(fields: [requirementId], references: [id], onDelete: Cascade)
+
+  @@unique([runId, requirementId])
 }
 
 /** Many-to-many: one guidance source can cover multiple visa routes. */

@@ -26,6 +26,7 @@ export const LIMITS = {
   sponsorInvite:       { max: 10, window: 60 * MIN },  // per case: sponsor invite/resend attempts
   aiAnalyse:           { max: 60, window: 60 * MIN },  // per staff user: AI document analysis
   docCheck:            { max: 20, window: 60 * MIN },  // per staff user: document fact checks
+  guidanceCheck:       { max: 20, window: 60 * MIN },  // per staff user: guidance-check runs
   guidanceUpload:      { max: 20, window: 60 * MIN },  // per admin user: guidance file uploads
   requirementsDraft:   { max: 5,  window: 60 * MIN },  // per admin user: start a requirements draft run
 } as const;

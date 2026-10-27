@@ -8,10 +8,11 @@ import GuidancePanel from "./GuidancePanel";
 import RequirementsPanel from "./RequirementsPanel";
 import MessageThread from "./MessageThread";
 import AnalyseTab from "./AnalyseTab";
+import GuidanceCheckTab from "./GuidanceCheckTab";
 import type { AnalysisView } from "@/lib/case-analysis";
 import { STAFF_LABEL, Page, Row, StatusPill, Tabs, api, useHashView, useToast, type Status } from "./ui";
 
-type Tab = "review" | "missing" | "folders" | "client" | "messages" | "analyse";
+type Tab = "review" | "missing" | "folders" | "client" | "messages" | "analyse" | "guidance-check";
 type AdminTab = "team" | "firm" | "checklists";
 type View = { screen: "list" } | { screen: "new" } | { screen: "admin"; tab: AdminTab } | { screen: "guidance" } | { screen: "requirements" } | { screen: "case"; id: string; tab: Tab; group?: string; doc?: string };
 type Home = {
@@ -23,7 +24,7 @@ type Home = {
 };
 type Doc = StaffCaseView["groups"][number]["docs"][number] & { status: Status };
 
-const TABS: Tab[] = ["review", "missing", "folders", "client", "messages", "analyse"];
+const TABS: Tab[] = ["review", "missing", "folders", "client", "messages", "analyse", "guidance-check"];
 const parse = (h: string): View => {
   const [a, id, tab, kind, x] = h.split("/");
   if (a === "new") return { screen: "new" };
@@ -371,6 +372,14 @@ function CaseView({
     ) : (
       <p className="muted" role="status">Loading…</p>
     );
+  else if (view.tab === "guidance-check")
+    body = (
+      <GuidanceCheckTab
+        clientId={view.id}
+        aiEnabled={data.aiEnabled}
+        toast={toast}
+      />
+    );
   else
     body = (
       <div className="detail">
@@ -457,6 +466,7 @@ function CaseView({
           ["client", "Client"],
           ["messages", unread > 0 ? `Messages (${unread})` : "Messages"],
           ...(data.aiEnabled ? [["analyse", "Analyse"] as [Tab, string]] : []),
+          ...(data.aiEnabled ? [["guidance-check", "Guidance check"] as [Tab, string]] : []),
         ]}
         value={view.tab}
         onChange={(t) => go({ screen: "case", id: view.id, tab: t })}

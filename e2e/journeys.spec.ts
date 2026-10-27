@@ -1401,3 +1401,58 @@ test.describe.serial("doc-checks — D1/D2", () => {
     expect(holderFact, "holder-name fact must appear in case summary").toBeTruthy();
   });
 });
+
+test.describe.serial("guidance-check — E1/E2/E3", () => {
+  const mutHeaders = { Origin: E2E.APP_URL };
+  const cronHeaders = { Authorization: `Bearer ${E2E.CRON_SECRET}` };
+  let clientId = "";
+
+  async function setAiEnabled(enabled: boolean) {
+    const adminRes = await sharedStaffPage.request.get("/api/admin");
+    const { firm } = await adminRes.json() as { firm: { name: string; phone: string; whatsapp: string; reviewDays: number; guidanceReviewMonths: number } };
+    await sharedStaffPage.request.post("/api/admin/firm", {
+      headers: mutHeaders,
+      data: JSON.stringify({ ...firm, aiEnabled: enabled }),
+    });
+  }
+
+  test.beforeAll(async () => {
+    const casesRes = await sharedStaffPage.request.get("/api/staff/cases");
+    const casesData = await casesRes.json() as { cases: { id: string; caseRef: string }[] };
+    const amina = casesData.cases.find((c) => c.caseRef === "IM-2041");
+    expect(amina, "seeded client IM-2041 must exist").toBeTruthy();
+    clientId = amina!.id;
+  });
+
+  test.afterAll(async () => {
+    await setAiEnabled(false);
+  });
+
+  test("E1: cron endpoint returns ok:true when no runs are queued", async () => {
+    const cronRes = await sharedStaffPage.request.get("/api/jobs/guidance-check", { headers: cronHeaders });
+    expect(cronRes.status()).toBe(200);
+    const body = await cronRes.json() as { ok: boolean };
+    expect(body.ok).toBe(true);
+  });
+
+  test("E2: POST guidance-check returns 403 when AI is disabled", async () => {
+    await setAiEnabled(false);
+    const res = await sharedStaffPage.request.post(
+      `/api/staff/cases/${clientId}/guidance-check`,
+      { headers: mutHeaders },
+    );
+    expect(res.status()).toBe(403);
+  });
+
+  test("E3: POST guidance-check with AI enabled but no approved requirements returns 403", async () => {
+    await setAiEnabled(true);
+    const res = await sharedStaffPage.request.post(
+      `/api/staff/cases/${clientId}/guidance-check`,
+      { headers: mutHeaders },
+    );
+    // No approved requirements on this route in the seed → 403
+    expect(res.status()).toBe(403);
+    const body = await res.json() as { error: string };
+    expect(body.error).toContain("approved requirements");
+  });
+});
