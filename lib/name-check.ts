@@ -1,12 +1,20 @@
 /**
- * Whole-word name comparison with known spelling-variant handling.
+ * Name comparison with normalisation and known spelling-variant handling.
  *
- * Rules:
- * - Each expected name part must appear as a whole word in the document name.
- * - A variant (e.g. Mohammed vs Muhammad) → UNCLEAR "Name differs: please confirm".
- * - An extra part in the document name that has no match → possible middle name → UNCLEAR.
- * - A missing expected part that isn't covered by any document part → FAIL.
- * - "Ali" does NOT match "Alison" (whole-word, not substring).
+ * Normalisation applied before comparison:
+ * - Lowercase
+ * - Remove accents (NFD → strip combining marks)
+ * - Replace hyphens and apostrophes with spaces
+ * - Remove commas and full stops
+ * - "SURNAME, GIVEN NAMES" reordered to "GIVEN NAMES SURNAME"
+ * - MRZ "SURNAME<<GIVEN" reordered to "GIVEN SURNAME" (single < → space)
+ *
+ * Verdict rules:
+ * - FAIL only when no expected name part matches at all.
+ * - Any partial match (some parts match, some don't) → UNCLEAR "Name differs: please confirm".
+ * - A variant spelling (Mohammed vs Muhammad) → UNCLEAR.
+ * - Extra middle names in the document → UNCLEAR (when both first and last are expected).
+ * - All expected parts matched exactly with no extras → OK.
  */
 
 export type NameVerdict = "OK" | "UNCLEAR" | "FAIL";
@@ -35,8 +43,32 @@ export const NAME_VARIANT_GROUPS: readonly string[][] = [
   ["Hussein", "Hussain", "Husain", "Hossein"],
 ];
 
-function toLower(s: string): string {
-  return s.toLowerCase();
+/**
+ * Normalise a name string for comparison.
+ * Handles MRZ order, "SURNAME, GIVEN" order, accents, hyphens, apostrophes.
+ */
+export function normaliseName(s: string): string {
+  // MRZ format: SURNAME<<GIVEN (double angle-brackets separate surname from given names)
+  if (s.includes("<<")) {
+    const firstDbl = s.indexOf("<<");
+    const surname = s.slice(0, firstDbl).replace(/</g, " ").trim();
+    const given = s.slice(firstDbl + 2).replace(/</g, " ").trim();
+    s = [given, surname].filter(Boolean).join(" ");
+  } else if (s.includes(",")) {
+    // "SURNAME, GIVEN NAMES" → reorder to "GIVEN NAMES SURNAME"
+    const commaIdx = s.indexOf(",");
+    const surname = s.slice(0, commaIdx).trim();
+    const given = s.slice(commaIdx + 1).trim();
+    s = [given, surname].filter(Boolean).join(" ");
+  }
+  // Remove accents
+  s = s.normalize("NFD").replace(/[̀-ͯ]/g, "");
+  // Replace hyphens and apostrophes with spaces
+  s = s.replace(/[-']/g, " ");
+  // Remove commas and full stops
+  s = s.replace(/[,.]/g, "");
+  // Lowercase and collapse whitespace
+  return s.toLowerCase().replace(/\s+/g, " ").trim();
 }
 
 /** Split a full name into individual word parts, ignoring empty strings. */
@@ -44,21 +76,21 @@ export function splitNameParts(name: string): string[] {
   return name.trim().split(/\s+/).filter(Boolean);
 }
 
-/** True when two name tokens are known spelling variants of each other. */
+/** True when two (already-lowercased) name tokens are known spelling variants of each other. */
 export function areVariants(a: string, b: string): boolean {
-  const al = toLower(a), bl = toLower(b);
+  const al = a.toLowerCase(), bl = b.toLowerCase();
   if (al === bl) return false; // exact match handled separately
   return NAME_VARIANT_GROUPS.some(
-    (group) => group.map(toLower).includes(al) && group.map(toLower).includes(bl),
+    (group) => group.map((g) => g.toLowerCase()).includes(al) && group.map((g) => g.toLowerCase()).includes(bl),
   );
 }
 
 /**
  * Compare an extracted document name against the expected name parts.
  *
- * @param docName   - The name extracted from the document (e.g. "Amina Ali Khan")
- * @param expectedFirst - Client/sponsor first name (may be null)
- * @param expectedLast  - Client/sponsor last name (may be null)
+ * Both sides are normalised before comparison.
+ * FAIL only when no expected part matches at all.
+ * Partial match → UNCLEAR.
  */
 export function compareNames(
   docName: string,
@@ -70,45 +102,47 @@ export function compareNames(
   }
 
   const expected = [expectedFirst, expectedLast].filter(Boolean) as string[];
-  const docParts = splitNameParts(docName);
-  const docLower = docParts.map(toLower);
+  // Normalise and flatten each expected component into individual tokens
+  const normExpected = expected.flatMap((e) => splitNameParts(normaliseName(e)));
+  const normDocParts = splitNameParts(normaliseName(docName));
 
+  let matchedCount = 0;
   let hasVariant = false;
   let hasMissing = false;
 
-  for (const exp of expected) {
-    const el = toLower(exp);
-    if (docLower.includes(el)) {
-      // exact match — good
+  for (const expPart of normExpected) {
+    if (normDocParts.includes(expPart)) {
+      matchedCount++;
       continue;
     }
-    // Check variant match
-    const variantIdx = docLower.findIndex((d) => areVariants(exp, d));
+    const variantIdx = normDocParts.findIndex((d) => areVariants(expPart, d));
     if (variantIdx !== -1) {
+      matchedCount++;
       hasVariant = true;
       continue;
     }
-    // No match at all → FAIL
     hasMissing = true;
   }
 
-  if (hasMissing) {
-    const exp = expected.join(" ");
+  // FAIL only when no expected part matches at all
+  if (matchedCount === 0) {
     return {
       verdict: "FAIL",
-      detail: `Name "${docName}" does not match expected "${exp}".`,
+      detail: `Name "${docName}" does not match expected "${expected.join(" ")}".`,
     };
   }
 
-  // Only flag extra doc parts as UNCLEAR when we have a full expected name (both components).
-  // If only one component is set, extra parts just mean we don't have the full name to compare.
+  // Partial match (some expected parts missing) → UNCLEAR (possible maiden name / different surname)
+  if (hasMissing) {
+    return { verdict: "UNCLEAR", detail: "Name differs: please confirm." };
+  }
+
+  // All expected parts matched — check for extra doc parts (possible middle names) or variants
   const haveBothComponents = expectedFirst !== null && expectedLast !== null;
   if (haveBothComponents) {
-    const expectedLower = expected.map(toLower);
-    const unmatchedDocParts = docParts.filter((dp) => {
-      const dl = toLower(dp);
-      if (expectedLower.includes(dl)) return false;
-      if (expected.some((e) => areVariants(e, dp))) return false;
+    const unmatchedDocParts = normDocParts.filter((dp) => {
+      if (normExpected.includes(dp)) return false;
+      if (normExpected.some((e) => areVariants(e, dp))) return false;
       return true;
     });
     if (hasVariant || unmatchedDocParts.length > 0) {
@@ -118,10 +152,7 @@ export function compareNames(
     return { verdict: "UNCLEAR", detail: "Name differs: please confirm." };
   }
 
-  return {
-    verdict: "OK",
-    detail: `Name "${docName}" matches.`,
-  };
+  return { verdict: "OK", detail: `Name "${docName}" matches.` };
 }
 
 /** Cross-document name consistency: all names found for one person must agree. */
@@ -142,7 +173,8 @@ export function crossDocNameConsistency(
     return { verdict: "OK", detail: "Only one document — no cross-check needed." };
   }
 
-  const names = entries.map((e) => splitNameParts(e.value));
+  // Normalise and split each entry
+  const names = entries.map((e) => splitNameParts(normaliseName(e.value)));
   let anyVariantOrMiddle = false;
   let anyConflict = false;
 
@@ -167,24 +199,20 @@ export function crossDocNameConsistency(
 type PairResult = "exact" | "variant-or-middle" | "conflict";
 
 function namesConsistent(a: string[], b: string[]): PairResult {
-  // Find the shorter set as the "base"
+  // Find the shorter set as the "base" (already normalised/lowercased)
   const [base, ext] = a.length <= b.length ? [a, b] : [b, a];
-  const extLower = ext.map(toLower);
 
   let hasVariant = false;
   for (const part of base) {
-    const pl = toLower(part);
-    if (extLower.includes(pl)) continue;
-    const vidx = extLower.findIndex((e) => areVariants(part, e));
+    if (ext.includes(part)) continue;
+    const vidx = ext.findIndex((e) => areVariants(part, e));
     if (vidx !== -1) { hasVariant = true; continue; }
     return "conflict";
   }
 
   // Extra parts in ext beyond base → possible middle name
-  const baseLower = base.map(toLower);
   const extraParts = ext.filter((ep) => {
-    const el = toLower(ep);
-    if (baseLower.includes(el)) return false;
+    if (base.includes(ep)) return false;
     if (base.some((b2) => areVariants(b2, ep))) return false;
     return true;
   });

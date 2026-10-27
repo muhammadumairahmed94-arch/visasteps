@@ -4,6 +4,7 @@ import { purgeExpiredUploadSessions } from "./upload-sessions";
 import { backupAgeHours, backupsConfigured } from "./health";
 import { notifyOps } from "./alerts";
 import { processDraftRuns } from "./draft-runs";
+import { processDocCheckRuns } from "./doc-check-runs";
 
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
@@ -20,6 +21,7 @@ export function startBackgroundJobs() {
       await keepAlive();
       await processQueue();
       await processDraftRuns();
+      await processDocCheckRuns();
       if (!g.lastReminders || Date.now() - g.lastReminders > 15 * 60_000) {
         g.lastReminders = Date.now();
         const r = await sendDueReminders();

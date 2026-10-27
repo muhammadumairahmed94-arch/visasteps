@@ -36,19 +36,27 @@ export interface PayslipEntry {
   amount: number;
   formattedAmount: string;
   payPeriod: "monthly" | "weekly" | "annual" | "unknown";
-  dateFound: string | null;
+  payType: "gross" | "net" | "ytd" | "unknown";
+  payDate: string | null;
+  person: "CLIENT" | "SPONSOR";
   docTitle: string;
   quote: string;
 }
 
-/** Aggregated payslip data across all payslip documents. */
+/** Aggregated income data for one person (client or sponsor). */
+export interface PersonPayslipSummary {
+  grossEntries: PayslipEntry[];
+  otherEntries: PayslipEntry[];
+  payslipCount: number;
+  dateRange: { earliest: string | null; latest: string | null };
+  annualEstimate: number | null;
+  estimateBasis: "monthly" | "weekly" | "unclear";
+}
+
+/** Aggregated payslip data split by person. */
 export interface PayslipSummary {
-  entries: PayslipEntry[];
-  totalMonthly: number | null;   // sum of all monthly entries
-  totalWeekly: number | null;    // sum of all weekly entries
-  annualisedMonthly: number | null; // totalMonthly * 12
-  annualisedWeekly: number | null;  // totalWeekly * 52
-  averageMonthly: number | null; // mean of monthly entries
+  client: PersonPayslipSummary | null;
+  sponsor: PersonPayslipSummary | null;
 }
 
 /** Cross-document name consistency result. */
@@ -150,6 +158,14 @@ function detectPayPeriod(quote: string): "monthly" | "weekly" | "annual" | "unkn
   return "unknown";
 }
 
+function detectPayType(quote: string): "gross" | "net" | "ytd" | "unknown" {
+  const q = quote.toLowerCase();
+  if (/\b(?:year[\s-]to[\s-]date|ytd|cumulative|total\s+to\s+date)\b/.test(q)) return "ytd";
+  if (/\b(?:gross\s+(?:pay|salary|income|wages)|basic\s+(?:pay|salary)|gross\b)/.test(q)) return "gross";
+  if (/\b(?:net\s+(?:pay|salary)|take[\s-]home|after\s+tax)\b/.test(q)) return "net";
+  return "unknown";
+}
+
 function extractFirstDateFromQuote(quote: string): string | null {
   const numMatch = quote.match(/\b\d{1,2}[/.]\d{1,2}[/.]\d{4}\b/);
   if (numMatch) return numMatch[0];
@@ -159,20 +175,56 @@ function extractFirstDateFromQuote(quote: string): string | null {
   return null;
 }
 
+function buildPersonPayslipSummary(entries: PayslipEntry[]): PersonPayslipSummary {
+  const grossAll = entries.filter((e) => e.payType === "gross");
+  const otherEntries = entries.filter((e) => e.payType !== "gross");
+
+  // Deduplicate gross entries by payDate
+  const seen = new Set<string>();
+  const grossEntries: PayslipEntry[] = [];
+  for (const e of grossAll) {
+    const key = e.payDate ?? `_${e.docTitle}_${e.amount}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      grossEntries.push(e);
+    }
+  }
+
+  const payslipCount = grossEntries.length;
+  const dates = grossEntries.map((e) => e.payDate).filter(Boolean) as string[];
+  const dateRange = {
+    earliest: dates.length > 0 ? dates.reduce((a, b) => (a < b ? a : b)) : null,
+    latest: dates.length > 0 ? dates.reduce((a, b) => (a > b ? a : b)) : null,
+  };
+
+  if (payslipCount === 0) {
+    return { grossEntries, otherEntries, payslipCount, dateRange, annualEstimate: null, estimateBasis: "unclear" };
+  }
+
+  const monthly = grossEntries.filter((e) => e.payPeriod === "monthly");
+  const weekly = grossEntries.filter((e) => e.payPeriod === "weekly");
+  const mixedOrUnknown = grossEntries.filter((e) => e.payPeriod === "unknown" || e.payPeriod === "annual");
+
+  let annualEstimate: number | null = null;
+  let estimateBasis: "monthly" | "weekly" | "unclear" = "unclear";
+
+  if (mixedOrUnknown.length === 0 && monthly.length > 0 && weekly.length === 0) {
+    annualEstimate = Math.round((monthly.reduce((s, e) => s + e.amount, 0) / monthly.length) * 12);
+    estimateBasis = "monthly";
+  } else if (mixedOrUnknown.length === 0 && weekly.length > 0 && monthly.length === 0) {
+    annualEstimate = Math.round((weekly.reduce((s, e) => s + e.amount, 0) / weekly.length) * 52);
+    estimateBasis = "weekly";
+  }
+
+  return { grossEntries, otherEntries, payslipCount, dateRange, annualEstimate, estimateBasis };
+}
+
 export function buildPayslipSummary(entries: PayslipEntry[]): PayslipSummary {
-  const monthly = entries.filter((e) => e.payPeriod === "monthly");
-  const weekly = entries.filter((e) => e.payPeriod === "weekly");
-
-  const totalMonthly = monthly.length > 0 ? monthly.reduce((s, e) => s + e.amount, 0) : null;
-  const totalWeekly = weekly.length > 0 ? weekly.reduce((s, e) => s + e.amount, 0) : null;
-
+  const clientEntries = entries.filter((e) => e.person === "CLIENT");
+  const sponsorEntries = entries.filter((e) => e.person === "SPONSOR");
   return {
-    entries,
-    totalMonthly,
-    totalWeekly,
-    annualisedMonthly: totalMonthly !== null ? Math.round(totalMonthly * 12) : null,
-    annualisedWeekly: totalWeekly !== null ? Math.round(totalWeekly * 52) : null,
-    averageMonthly: monthly.length > 0 ? Math.round(totalMonthly! / monthly.length) : null,
+    client: clientEntries.length > 0 ? buildPersonPayslipSummary(clientEntries) : null,
+    sponsor: sponsorEntries.length > 0 ? buildPersonPayslipSummary(sponsorEntries) : null,
   };
 }
 
@@ -359,7 +411,9 @@ export function collectPayslipEntries(docs: DocCheckResult[]): PayslipEntry[] {
         amount,
         formattedAmount: fact.value,
         payPeriod: detectPayPeriod(fact.quote),
-        dateFound: extractFirstDateFromQuote(fact.quote),
+        payType: detectPayType(fact.quote),
+        payDate: extractFirstDateFromQuote(fact.quote),
+        person: doc.uploaderKind,
         docTitle: doc.title,
         quote: fact.quote,
       });

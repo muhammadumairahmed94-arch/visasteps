@@ -3,7 +3,7 @@
 import { useState, useEffect, type FormEvent } from "react";
 import type { AnalysisView } from "@/lib/case-analysis";
 import type { AiCaseClaim } from "@/lib/adapters/ai";
-import type { CheckDocumentsResult, DocCheckResult, CrossDocNameCheck, PayslipSummary } from "@/lib/doc-checks";
+import type { CheckDocumentsResult, DocCheckResult, CrossDocNameCheck, PayslipSummary, PersonPayslipSummary } from "@/lib/doc-checks";
 import { api } from "./ui";
 
 interface Props {
@@ -93,31 +93,50 @@ function CrossDocChecks({ checks }: { checks: CrossDocNameCheck[] }) {
   );
 }
 
-function PayslipSection({ summary }: { summary: PayslipSummary }) {
-  if (summary.entries.length === 0) return null;
+function PersonIncomeSection({ label, s }: { label: string; s: PersonPayslipSummary }) {
+  const { earliest, latest } = s.dateRange;
+  const dateLabel = earliest && latest && earliest !== latest
+    ? `${earliest} – ${latest}`
+    : earliest ?? null;
   return (
-    <section className="payslip-summary">
-      <h4 className="small">Income summary</h4>
+    <div className="person-income">
+      <strong className="small">{label}</strong>
       <ul className="claims-list small">
-        {summary.entries.map((e, i) => (
+        {s.grossEntries.map((e, i) => (
           <li key={i}>
-            {e.formattedAmount}
+            {e.formattedAmount} gross
             {e.payPeriod !== "unknown" ? ` (${e.payPeriod})` : ""}
-            {e.dateFound ? ` — ${e.dateFound}` : ""}
-            <span className="muted"> from {e.docTitle}</span>
+            {e.payDate ? ` — ${e.payDate}` : ""}
+            <span className="muted"> · {e.docTitle}</span>
+          </li>
+        ))}
+        {s.otherEntries.map((e, i) => (
+          <li key={`o${i}`} className="muted">
+            {e.formattedAmount} ({e.payType})
+            {e.payDate ? ` — ${e.payDate}` : ""}
+            <span> · {e.docTitle}</span>
           </li>
         ))}
       </ul>
-      {summary.annualisedMonthly !== null && (
+      {s.estimateBasis !== "unclear" && s.annualEstimate !== null ? (
         <p className="small">
-          Monthly total: £{summary.totalMonthly?.toLocaleString("en-GB") ?? "—"} · Annualised: £{summary.annualisedMonthly.toLocaleString("en-GB")}
+          Annual estimate: <strong>£{s.annualEstimate.toLocaleString("en-GB")}</strong>
+          {" "}({s.payslipCount} payslip{s.payslipCount !== 1 ? "s" : ""}{dateLabel ? `, ${dateLabel}` : ""})
         </p>
-      )}
-      {summary.annualisedWeekly !== null && !summary.annualisedMonthly && (
-        <p className="small">
-          Weekly total: £{summary.totalWeekly?.toLocaleString("en-GB") ?? "—"} · Annualised: £{summary.annualisedWeekly.toLocaleString("en-GB")}
-        </p>
-      )}
+      ) : s.grossEntries.length > 0 ? (
+        <p className="small muted">Annual estimate: UNCLEAR — pay period not confirmed</p>
+      ) : null}
+    </div>
+  );
+}
+
+function PayslipSection({ summary }: { summary: PayslipSummary }) {
+  if (!summary.client && !summary.sponsor) return null;
+  return (
+    <section className="payslip-summary">
+      <h4 className="small">Income summary</h4>
+      {summary.client && <PersonIncomeSection label="Client" s={summary.client} />}
+      {summary.sponsor && <PersonIncomeSection label="Partner" s={summary.sponsor} />}
     </section>
   );
 }
