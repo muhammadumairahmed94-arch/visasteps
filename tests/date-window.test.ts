@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { resolveDateWindow, ukToday } from "../lib/date-window";
+import { resolveDateWindow, isDateInWindow, ukToday } from "../lib/date-window";
 
 // Anchor dates used across tests — constructed as UTC midnight to match resolveDateWindow's output
 const d = (y: number, m: number, day: number) => new Date(Date.UTC(y, m - 1, day));
@@ -117,6 +117,73 @@ describe("resolveDateWindow — unknown / freeform", () => {
 
   it("returns a plain description unchanged", () => {
     expect(resolveDateWindow("valid for 6 months from the date of the x-ray", d(2026, 10, 1))).toBe("valid for 6 months from the date of the x-ray");
+  });
+});
+
+describe("isDateInWindow — last N months", () => {
+  // anchor = 1 Jan 2027 → last 6 months = Jul–Dec 2026
+  const anchor = d(2027, 1, 1);
+
+  it("true for date inside the window", () => {
+    expect(isDateInWindow(d(2026, 9, 15), "last 6 months", anchor)).toBe(true);
+  });
+
+  it("true on the first day of the window", () => {
+    expect(isDateInWindow(d(2026, 7, 1), "last 6 months", anchor)).toBe(true);
+  });
+
+  it("true on the last day of the window", () => {
+    expect(isDateInWindow(d(2026, 12, 31), "last 6 months", anchor)).toBe(true);
+  });
+
+  it("false for date before the window starts", () => {
+    expect(isDateInWindow(d(2026, 6, 30), "last 6 months", anchor)).toBe(false);
+  });
+
+  it("false for date in the anchor month (window ends month before)", () => {
+    expect(isDateInWindow(d(2027, 1, 1), "last 6 months", anchor)).toBe(false);
+  });
+
+  it("wraps across year boundary: last 6 months from Feb 2027 → Aug 2026–Jan 2027", () => {
+    const a = d(2027, 2, 1);
+    expect(isDateInWindow(d(2026, 8, 1), "last 6 months", a)).toBe(true);
+    expect(isDateInWindow(d(2027, 1, 31), "last 6 months", a)).toBe(true);
+    expect(isDateInWindow(d(2026, 7, 31), "last 6 months", a)).toBe(false);
+  });
+});
+
+describe("isDateInWindow — last N days", () => {
+  // anchor = 1 Jan 2027 → last 28 days = 4 Dec 2026 – 1 Jan 2027
+  const anchor = d(2027, 1, 1);
+
+  it("true for date inside the window", () => {
+    expect(isDateInWindow(d(2026, 12, 15), "last 28 days", anchor)).toBe(true);
+  });
+
+  it("true on the earliest day of the window", () => {
+    expect(isDateInWindow(d(2026, 12, 4), "last 28 days", anchor)).toBe(true);
+  });
+
+  it("true on the anchor date itself", () => {
+    expect(isDateInWindow(d(2027, 1, 1), "last 28 days", anchor)).toBe(true);
+  });
+
+  it("false for date before the window", () => {
+    expect(isDateInWindow(d(2026, 12, 3), "last 28 days", anchor)).toBe(false);
+  });
+
+  it("false for date after anchor", () => {
+    expect(isDateInWindow(d(2027, 1, 2), "last 28 days", anchor)).toBe(false);
+  });
+});
+
+describe("isDateInWindow — unknown pattern", () => {
+  it("returns null for an unrecognised pattern", () => {
+    expect(isDateInWindow(d(2026, 9, 15), "last 4 years", d(2027, 1, 1))).toBeNull();
+  });
+
+  it("returns null for a freeform string", () => {
+    expect(isDateInWindow(d(2026, 9, 15), "valid for 6 months from date of x-ray", d(2027, 1, 1))).toBeNull();
   });
 });
 

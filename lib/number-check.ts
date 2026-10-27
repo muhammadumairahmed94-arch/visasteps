@@ -1,3 +1,10 @@
+/** A date parsed from UK-format text (day-first). */
+export interface ParsedDate {
+  day: number;
+  month: number; // 1–12
+  year: number;
+}
+
 const MONTHS_FULL = [
   "January", "February", "March", "April", "May", "June",
   "July", "August", "September", "October", "November", "December",
@@ -16,15 +23,15 @@ const NUMERIC_DATE_RE = /\b(\d{1,2})[\/.](\d{1,2})[\/.](\d{4})\b/g;
 /** Matches "12 March 2027" or "12 Mar 2027" */
 const NAMED_DATE_SRC = `\\b(\\d{1,2})\\s+(${[...MONTHS_FULL, ...MONTHS_SHORT].join("|")})\\s+(\\d{4})\\b`;
 
-interface ParsedDate {
+interface RawDate {
   day: number;
   month: number; // 1-12
   year: number;
   original: string;
 }
 
-function parseUkDates(text: string): ParsedDate[] {
-  const results: ParsedDate[] = [];
+function parseUkDates(text: string): RawDate[] {
+  const results: RawDate[] = [];
 
   let m: RegExpExecArray | null;
 
@@ -51,6 +58,14 @@ function parseUkDates(text: string): ParsedDate[] {
   }
 
   return results;
+}
+
+/** Parse the first UK date found in `text`. Returns null when none found. */
+export function parseSingleUkDate(text: string): ParsedDate | null {
+  const dates = parseUkDates(text.trim());
+  if (dates.length === 0) return null;
+  const { day, month, year } = dates[0];
+  return { day, month, year };
 }
 
 function dateVariants(day: number, month: number, year: number): string[] {

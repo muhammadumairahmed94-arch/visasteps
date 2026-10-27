@@ -70,3 +70,42 @@ export function resolveDateWindow(window: string, anchor: Date): string {
   // Unknown pattern — return as-is so admin-entered freeform text is shown verbatim
   return window;
 }
+
+/**
+ * Returns true when `date` falls within the window ending just before `anchor`.
+ * Returns null when the window string is not a recognised pattern.
+ *
+ * "last N months" → 1st of startMonth ≤ date ≤ last day of endMonth
+ *   (endMonth is the calendar month before anchor, mirroring resolveDateWindow)
+ * "last N days"   → (anchor − N days) ≤ date ≤ anchor
+ *
+ * All comparisons are UTC-midnight Dates.
+ */
+export function isDateInWindow(date: Date, window: string, anchor: Date): boolean | null {
+  const monthsMatch = window.match(/^last (\d+) months?$/i);
+  if (monthsMatch) {
+    const n = parseInt(monthsMatch[1], 10);
+    let endMonth = anchor.getUTCMonth() - 1;
+    let endYear = anchor.getUTCFullYear();
+    if (endMonth < 0) { endMonth = 11; endYear -= 1; }
+
+    let startMonth = endMonth - (n - 1);
+    let startYear = endYear;
+    if (startMonth < 0) { startMonth += 12; startYear -= 1; }
+
+    const startDate = new Date(Date.UTC(startYear, startMonth, 1));
+    const endDate = new Date(Date.UTC(endYear, endMonth, lastDayOfMonth(endYear, endMonth)));
+    return date >= startDate && date <= endDate;
+  }
+
+  const daysMatch = window.match(/^last (\d+) days?$/i);
+  if (daysMatch) {
+    const n = parseInt(daysMatch[1], 10);
+    const earliest = new Date(Date.UTC(
+      anchor.getUTCFullYear(), anchor.getUTCMonth(), anchor.getUTCDate() - n,
+    ));
+    return date >= earliest && date <= anchor;
+  }
+
+  return null;
+}

@@ -1261,3 +1261,88 @@ test.describe.serial("analysis tab — A1/A2/A3/A4/A5", () => {
     expect(verifiedClaim, "expected a verified page-1 client-document claim from the uploaded PDF").toBeTruthy();
   });
 });
+
+test.describe.serial("doc-checks — D1", () => {
+  const mutHeaders = { Origin: E2E.APP_URL };
+  let clientId = "";
+
+  async function setAiEnabled(enabled: boolean) {
+    const adminRes = await sharedStaffPage.request.get("/api/admin");
+    const { firm } = await adminRes.json() as { firm: { name: string; phone: string; whatsapp: string; reviewDays: number; guidanceReviewMonths: number } };
+    await sharedStaffPage.request.post("/api/admin/firm", {
+      headers: mutHeaders,
+      data: JSON.stringify({ ...firm, aiEnabled: enabled }),
+    });
+  }
+
+  test.beforeAll(async () => {
+    const casesRes = await sharedStaffPage.request.get("/api/staff/cases");
+    const casesData = await casesRes.json() as { cases: { id: string; caseRef: string }[] };
+    const amina = casesData.cases.find((c) => c.caseRef === "IM-2041");
+    expect(amina, "seeded client IM-2041 must exist").toBeTruthy();
+    clientId = amina!.id;
+    await setAiEnabled(true);
+  });
+
+  test.afterAll(async () => {
+    await setAiEnabled(false);
+  });
+
+  test("D1: upload PDF with expiry date; doc-checks returns expiry verdict OK", async ({ playwright }) => {
+    // Text contains a future expiry date and enough surrounding words for quote verification.
+    const DOC_TEXT =
+      "Passport expires 15 December 2030. Issued to Ms Amina Khan. Valid document.";
+    const pdfBuf = await buildTextPdf(DOC_TEXT);
+
+    // Upload as Amina Khan (any non-readOnly document is fine)
+    const clientCtx = await playwright.request.newContext({
+      baseURL: E2E.APP_URL,
+      extraHTTPHeaders: { Origin: E2E.APP_URL },
+    });
+    await clientCtx.post("/api/auth/client/login", {
+      data: { email: "amina.khan@example.com", password: E2E.SEED_CLIENT_PASSWORD },
+    });
+    const portalRes = await clientCtx.get("/api/client/portal");
+    expect(portalRes.status()).toBe(200);
+    const portal = await portalRes.json() as {
+      groups: { docs: { id: string; status: string; readOnly: boolean }[] }[];
+    };
+    const uploadableDoc = portal.groups.flatMap((g) => g.docs).find((d) => d.status !== "OK" && !d.readOnly);
+    expect(uploadableDoc, "Amina's case needs at least one non-readOnly document for D1").toBeTruthy();
+
+    const hash = createHash("sha256").update(pdfBuf).digest("hex");
+    const startRes = await clientCtx.post("/api/client/upload/start", {
+      data: {
+        docId: uploadableDoc!.id,
+        pages: [{ fileName: "d1-test.pdf", sizeBytes: pdfBuf.length, sha256: hash, totalChunks: 1 }],
+        multiPage: false,
+      },
+    });
+    expect(startRes.status()).toBe(200);
+    const { sessionId } = await startRes.json() as { sessionId: string };
+    await clientCtx.put(`/api/client/upload/${sessionId}/chunk?page=0&n=0`, { data: pdfBuf });
+    await clientCtx.post(`/api/client/upload/${sessionId}/complete`);
+    await clientCtx.dispose();
+
+    // Run doc-checks as staff
+    const checkRes = await sharedStaffPage.request.post(
+      `/api/staff/cases/${clientId}/doc-checks`,
+      { headers: mutHeaders },
+    );
+    expect(checkRes.status()).toBe(200);
+    const body = await checkRes.json() as {
+      results: Array<{
+        title: string;
+        verdict: string;
+        checks: Array<{ name: string; verdict: string }>;
+      }>;
+    };
+
+    // The uploaded PDF must produce at least one document with an expiry check that passes
+    const withExpiry = body.results.find((r) => r.checks.some((c) => c.name === "Expiry date"));
+    expect(withExpiry, "expected at least one document result with an expiry check").toBeTruthy();
+
+    const expiryCheck = withExpiry!.checks.find((c) => c.name === "Expiry date")!;
+    expect(expiryCheck.verdict).toBe("OK");
+  });
+});

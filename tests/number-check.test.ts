@@ -1,5 +1,41 @@
 import { describe, it, expect } from "vitest";
-import { numbersMatch } from "@/lib/number-check";
+import { numbersMatch, parseSingleUkDate } from "@/lib/number-check";
+
+describe("parseSingleUkDate", () => {
+  it("parses DD/MM/YYYY as day-first", () => {
+    const r = parseSingleUkDate("12/03/2027");
+    expect(r).toEqual({ day: 12, month: 3, year: 2027 });
+  });
+
+  it("parses DD.MM.YYYY", () => {
+    const r = parseSingleUkDate("12.03.2027");
+    expect(r).toEqual({ day: 12, month: 3, year: 2027 });
+  });
+
+  it("parses full month name", () => {
+    const r = parseSingleUkDate("15 December 2030");
+    expect(r).toEqual({ day: 15, month: 12, year: 2030 });
+  });
+
+  it("parses abbreviated month", () => {
+    const r = parseSingleUkDate("15 Dec 2030");
+    expect(r).toEqual({ day: 15, month: 12, year: 2030 });
+  });
+
+  it("returns null for non-date text", () => {
+    expect(parseSingleUkDate("not a date")).toBeNull();
+  });
+
+  it("returns the first date when multiple dates are present", () => {
+    const r = parseSingleUkDate("12/03/2027 and also 15/06/2028");
+    expect(r).toEqual({ day: 12, month: 3, year: 2027 });
+  });
+
+  it("treats DD/MM/YYYY as UK day-first: 03/12/2027 is 3 December", () => {
+    const r = parseSingleUkDate("03/12/2027");
+    expect(r).toEqual({ day: 3, month: 12, year: 2027 });
+  });
+});
 
 describe("numbersMatch — page reference stripping", () => {
   it("ignores 'page N' in claim text", () => {
