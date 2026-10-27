@@ -21,7 +21,8 @@
     "test:e2e": "playwright test",
     "init:production": "tsx --env-file=.env scripts/init-production.mts",
     "checklists:sync": "tsx --env-file=.env scripts/sync-checklists.mts",
-    "backup:now": "tsx --env-file=.env scripts/backup.mts"
+    "backup:now": "tsx --env-file=.env scripts/backup.mts",
+    "ai:eval": "tsx --env-file=.env scripts/eval-guidance.mts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^1.3.0",
