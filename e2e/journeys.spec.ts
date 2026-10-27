@@ -1262,8 +1262,9 @@ test.describe.serial("analysis tab — A1/A2/A3/A4/A5", () => {
   });
 });
 
-test.describe.serial("doc-checks — D1", () => {
+test.describe.serial("doc-checks — D1/D2", () => {
   const mutHeaders = { Origin: E2E.APP_URL };
+  const cronHeaders = { Authorization: `Bearer ${E2E.CRON_SECRET}` };
   let clientId = "";
 
   async function setAiEnabled(enabled: boolean) {
@@ -1273,6 +1274,29 @@ test.describe.serial("doc-checks — D1", () => {
       headers: mutHeaders,
       data: JSON.stringify({ ...firm, aiEnabled: enabled }),
     });
+  }
+
+  type DocCheckDoc = {
+    title: string;
+    verdict: string;
+    checks: Array<{ name: string; verdict: string }>;
+    summaryFacts: Array<{ factKind: string; value: string }>;
+  };
+  type DocCheckRunPoll = { status: string; result: { docs: DocCheckDoc[] } | null };
+
+  async function pollDocCheckRun(runId: string) {
+    let runStatus = "QUEUED";
+    let runResult: { docs: DocCheckDoc[] } | null = null;
+    for (let i = 0; i < 10 && !["COMPLETE", "FAILED"].includes(runStatus); i++) {
+      await new Promise((r) => setTimeout(r, 500));
+      const pollRes = await sharedStaffPage.request.get(
+        `/api/staff/cases/${clientId}/doc-checks/${runId}`,
+      );
+      const run = await pollRes.json() as DocCheckRunPoll;
+      runStatus = run.status;
+      runResult = run.result;
+    }
+    return { runStatus, runResult };
   }
 
   test.beforeAll(async () => {
@@ -1288,7 +1312,7 @@ test.describe.serial("doc-checks — D1", () => {
     await setAiEnabled(false);
   });
 
-  test("D1: upload PDF with expiry date; doc-checks returns expiry verdict OK", async ({ playwright }) => {
+  test("D1: upload PDF with expiry date; background job returns expiry verdict OK", async ({ playwright }) => {
     // Text contains a future expiry date and enough surrounding words for quote verification.
     const DOC_TEXT =
       "Passport expires 15 December 2030. Issued to Ms Amina Khan. Valid document.";
@@ -1324,25 +1348,56 @@ test.describe.serial("doc-checks — D1", () => {
     await clientCtx.post(`/api/client/upload/${sessionId}/complete`);
     await clientCtx.dispose();
 
-    // Run doc-checks as staff
-    const checkRes = await sharedStaffPage.request.post(
+    // Start background doc-check run
+    const checkStartRes = await sharedStaffPage.request.post(
       `/api/staff/cases/${clientId}/doc-checks`,
       { headers: mutHeaders },
     );
-    expect(checkRes.status()).toBe(200);
-    const body = await checkRes.json() as {
-      results: Array<{
-        title: string;
-        verdict: string;
-        checks: Array<{ name: string; verdict: string }>;
-      }>;
-    };
+    expect(checkStartRes.status()).toBe(200);
+    const { runId } = await checkStartRes.json() as { runId: string };
+
+    // Trigger cron to process the run
+    const cronRes = await sharedStaffPage.request.get("/api/jobs/doc-checks", { headers: cronHeaders });
+    expect(cronRes.status()).toBe(200);
+
+    // Poll until run reaches a terminal state
+    const { runStatus, runResult } = await pollDocCheckRun(runId);
+    expect(runStatus).toBe("COMPLETE");
 
     // The uploaded PDF must produce at least one document with an expiry check that passes
-    const withExpiry = body.results.find((r) => r.checks.some((c) => c.name === "Expiry date"));
+    const allDocs = runResult?.docs ?? [];
+    const withExpiry = allDocs.find((r) => r.checks.some((c) => c.name === "Expiry date"));
     expect(withExpiry, "expected at least one document result with an expiry check").toBeTruthy();
 
     const expiryCheck = withExpiry!.checks.find((c) => c.name === "Expiry date")!;
     expect(expiryCheck.verdict).toBe("OK");
+  });
+
+  test("D2: case summary facts appear in completed background run", async () => {
+    // Create a new run — reuses the PDF uploaded by D1 which contains "Issued to Ms Amina Khan"
+    const checkStartRes = await sharedStaffPage.request.post(
+      `/api/staff/cases/${clientId}/doc-checks`,
+      { headers: mutHeaders },
+    );
+    expect(checkStartRes.status()).toBe(200);
+    const { runId } = await checkStartRes.json() as { runId: string };
+
+    // Trigger cron to process
+    const cronRes = await sharedStaffPage.request.get("/api/jobs/doc-checks", { headers: cronHeaders });
+    expect(cronRes.status()).toBe(200);
+
+    // Poll until complete
+    const { runStatus, runResult } = await pollDocCheckRun(runId);
+    expect(runStatus).toBe("COMPLETE");
+
+    // result.docs must be non-empty and at least one doc has summaryFacts
+    expect((runResult?.docs.length ?? 0), "result must have at least one processed document").toBeGreaterThan(0);
+    const docsWithFacts = (runResult?.docs ?? []).filter((d) => d.summaryFacts.length > 0);
+    expect(docsWithFacts.length, "at least one document must have summary facts").toBeGreaterThan(0);
+
+    // Holder-name fact must appear (from "Issued to Ms Amina Khan" in the PDF)
+    const allFacts = (runResult?.docs ?? []).flatMap((d) => d.summaryFacts);
+    const holderFact = allFacts.find((f) => f.factKind === "holder-name");
+    expect(holderFact, "holder-name fact must appear in case summary").toBeTruthy();
   });
 });

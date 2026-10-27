@@ -1,8 +1,9 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { useState, useEffect, type FormEvent } from "react";
 import type { AnalysisView } from "@/lib/case-analysis";
 import type { AiCaseClaim } from "@/lib/adapters/ai";
+import type { CheckDocumentsResult, DocCheckResult, CrossDocNameCheck, PayslipSummary } from "@/lib/doc-checks";
 import { api } from "./ui";
 
 interface Props {
@@ -12,13 +13,138 @@ interface Props {
   toast: (msg: string) => void;
 }
 
+interface RunStatus {
+  id: string;
+  status: string;
+  total: number;
+  done: number;
+  failed: number;
+  result: CheckDocumentsResult | null;
+}
+
+const VERDICT_LABEL: Record<string, string> = { OK: "✓", UNCLEAR: "?", FAIL: "✗" };
+const VERDICT_CLASS: Record<string, string> = { OK: "verdict-ok", UNCLEAR: "verdict-unclear", FAIL: "verdict-fail" };
+
+function VerdictBadge({ v }: { v: string }) {
+  return (
+    <span className={`verdict-badge ${VERDICT_CLASS[v] ?? ""}`} aria-label={v}>
+      {VERDICT_LABEL[v] ?? v}
+    </span>
+  );
+}
+
+function DocResultCard({ doc }: { doc: DocCheckResult }) {
+  return (
+    <div className={`doc-check-card ${VERDICT_CLASS[doc.verdict] ?? ""}`}>
+      <div className="doc-check-header">
+        <span className="doc-check-title">
+          {doc.uploaderKind === "SPONSOR" ? "Partner document: " : ""}{doc.title}
+        </span>
+        <VerdictBadge v={doc.verdict} />
+      </div>
+      {doc.checks.length > 0 && (
+        <ul className="check-list">
+          {doc.checks.map((c, i) => (
+            <li key={i} className="check-item">
+              <VerdictBadge v={c.verdict} />
+              <strong className="small">{c.name}</strong>
+              <span className="muted small"> — {c.detail}</span>
+              {c.factQuote && (
+                <blockquote className="claim-quote small">{c.factQuote}</blockquote>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+      {doc.summaryFacts.length > 0 && (
+        <details className="summary-facts">
+          <summary className="muted small">
+            {doc.summaryFacts.length} extracted fact{doc.summaryFacts.length === 1 ? "" : "s"}
+          </summary>
+          <ul className="claims-list">
+            {doc.summaryFacts.map((f, i) => (
+              <li key={i} className="small">
+                <span className="muted">{f.factKind}:</span> {f.value}
+                <blockquote className="claim-quote small">{f.quote}</blockquote>
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
+    </div>
+  );
+}
+
+function CrossDocChecks({ checks }: { checks: CrossDocNameCheck[] }) {
+  if (checks.length === 0) return null;
+  return (
+    <section className="cross-doc-checks">
+      <h4 className="small">Cross-document name consistency</h4>
+      <ul className="check-list">
+        {checks.map((c, i) => (
+          <li key={i} className="check-item">
+            <VerdictBadge v={c.verdict} />
+            <strong className="small">{c.expectedName}</strong>
+            <span className="muted small"> — {c.detail}</span>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+function PayslipSection({ summary }: { summary: PayslipSummary }) {
+  if (summary.entries.length === 0) return null;
+  return (
+    <section className="payslip-summary">
+      <h4 className="small">Income summary</h4>
+      <ul className="claims-list small">
+        {summary.entries.map((e, i) => (
+          <li key={i}>
+            {e.formattedAmount}
+            {e.payPeriod !== "unknown" ? ` (${e.payPeriod})` : ""}
+            {e.dateFound ? ` — ${e.dateFound}` : ""}
+            <span className="muted"> from {e.docTitle}</span>
+          </li>
+        ))}
+      </ul>
+      {summary.annualisedMonthly !== null && (
+        <p className="small">
+          Monthly total: £{summary.totalMonthly?.toLocaleString("en-GB") ?? "—"} · Annualised: £{summary.annualisedMonthly.toLocaleString("en-GB")}
+        </p>
+      )}
+      {summary.annualisedWeekly !== null && !summary.annualisedMonthly && (
+        <p className="small">
+          Weekly total: £{summary.totalWeekly?.toLocaleString("en-GB") ?? "—"} · Annualised: £{summary.annualisedWeekly.toLocaleString("en-GB")}
+        </p>
+      )}
+    </section>
+  );
+}
+
 export default function AnalyseTab({ clientId, view, onRefresh, toast }: Props) {
   const [selectedFolders, setSelectedFolders] = useState<string[]>([]);
   const [question, setQuestion] = useState("");
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<{ answer: string; claims: AiCaseClaim[]; notFound: boolean } | null>(null);
 
+  const [summaryRunId, setSummaryRunId] = useState<string | null>(null);
+  const [summaryRun, setSummaryRun] = useState<RunStatus | null>(null);
+  const [summaryBusy, setSummaryBusy] = useState(false);
+
   const foldersToUse = selectedFolders.length > 0 ? selectedFolders : undefined;
+
+  // Poll the summary run until it reaches a terminal state
+  useEffect(() => {
+    if (!summaryRunId) return;
+    if (summaryRun?.status === "COMPLETE" || summaryRun?.status === "FAILED") return;
+
+    const tid = setTimeout(async () => {
+      const r = await api<RunStatus>(`/api/staff/cases/${clientId}/doc-checks/${summaryRunId}`);
+      if (r.ok) setSummaryRun(r.data);
+    }, 1500);
+    return () => clearTimeout(tid);
+  }, [summaryRunId, summaryRun, clientId]);
 
   async function ask(e: FormEvent) {
     e.preventDefault();
@@ -42,6 +168,19 @@ export default function AnalyseTab({ clientId, view, onRefresh, toast }: Props) 
     onRefresh();
   }
 
+  async function startSummary() {
+    setSummaryBusy(true);
+    setSummaryRun(null);
+    setSummaryRunId(null);
+    const r = await api<{ runId: string }>(
+      `/api/staff/cases/${clientId}/doc-checks`,
+      { method: "POST" },
+    );
+    setSummaryBusy(false);
+    if (!r.ok) { toast(r.error); return; }
+    setSummaryRunId(r.data.runId);
+  }
+
   function toggleFolder(id: string) {
     setSelectedFolders((prev) =>
       prev.includes(id) ? prev.filter((f) => f !== id) : [...prev, id],
@@ -57,11 +196,71 @@ export default function AnalyseTab({ clientId, view, onRefresh, toast }: Props) 
     : view.totalTokenEstimate;
 
   const overLimit = estimatedTokens > 80_000;
+  const summaryInProgress = summaryRun !== null && summaryRun.status !== "COMPLETE" && summaryRun.status !== "FAILED";
+  const summaryProgressPct = summaryRun ? Math.round((summaryRun.done / Math.max(summaryRun.total, 1)) * 100) : 0;
 
   return (
     <div className="analyse-tab">
       <h2 data-focus tabIndex={-1}>Analyse</h2>
 
+      {/* Case Summary section */}
+      <section className="case-summary-section">
+        <div className="case-summary-header">
+          <h3>Case summary</h3>
+          <button
+            type="button"
+            className="big"
+            onClick={startSummary}
+            disabled={summaryBusy || summaryInProgress || view.folders.length === 0}
+            aria-label="Run AI document fact check"
+          >
+            {summaryBusy || summaryInProgress ? "Checking…" : "Case summary"}
+          </button>
+        </div>
+
+        {(summaryInProgress || summaryRun) && (
+          <div className="summary-progress" aria-live="polite">
+            {summaryInProgress && (
+              <>
+                <div
+                  className="progress-bar"
+                  role="progressbar"
+                  aria-valuenow={summaryProgressPct}
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                >
+                  <div className="progress-bar-fill" style={{ width: `${summaryProgressPct}%` }} />
+                </div>
+                <p className="muted small">
+                  Checking document {summaryRun.done + 1} of {summaryRun.total}…
+                </p>
+              </>
+            )}
+
+            {summaryRun?.status === "FAILED" && (
+              <p className="error" role="alert">Document check failed. Please try again.</p>
+            )}
+
+            {summaryRun?.status === "COMPLETE" && summaryRun.result && (
+              <div className="summary-results">
+                <CrossDocChecks checks={summaryRun.result.crossDocNameChecks} />
+                <PayslipSection summary={summaryRun.result.payslipSummary} />
+                <div className="doc-check-list">
+                  {summaryRun.result.docs.map((doc) => (
+                    <DocResultCard key={doc.docId} doc={doc} />
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {summaryRun?.status === "COMPLETE" && summaryRun.done === 0 && (
+              <p className="muted small">No readable text found in documents.</p>
+            )}
+          </div>
+        )}
+      </section>
+
+      {/* Folder filter */}
       {view.folders.length > 0 && (
         <section className="analyse-folders">
           <p className="muted small">Filter to specific folders (optional):</p>

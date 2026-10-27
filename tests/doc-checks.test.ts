@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { checkExpiry, checkDateWindow, checkName, checkAmount } from "@/lib/doc-checks";
+import { checkExpiry, checkDateWindow, checkName, checkMrz } from "@/lib/doc-checks";
 
 const ANCHOR = new Date(Date.UTC(2027, 0, 1)); // 1 Jan 2027
 const QUOTE = "quote text long enough for the check function to accept as a verified fact snippet";
@@ -82,7 +82,7 @@ describe("checkDateWindow", () => {
 });
 
 describe("checkName", () => {
-  it("OK when both first and last name match", () => {
+  it("OK when both first and last name match exactly", () => {
     expect(checkName("Amina Khan", QUOTE, "Amina", "Khan").verdict).toBe("OK");
   });
 
@@ -102,7 +102,7 @@ describe("checkName", () => {
     expect(checkName("Amina Khan", QUOTE, null, null).verdict).toBe("UNCLEAR");
   });
 
-  it("OK when only last name is set and it matches", () => {
+  it("OK when only last name is set and it matches (extra first-name part is not flagged)", () => {
     expect(checkName("Amina Khan", QUOTE, null, "Khan").verdict).toBe("OK");
   });
 
@@ -110,40 +110,36 @@ describe("checkName", () => {
     expect(checkName("Amina Smith", QUOTE, null, "Khan").verdict).toBe("FAIL");
   });
 
-  it("detail contains the extracted name", () => {
-    const r = checkName("Amina Khan", QUOTE, "Amina", "Khan");
-    expect(r.detail).toContain("Amina Khan");
+  it("UNCLEAR when variant spelling with both names set", () => {
+    expect(checkName("Mohammed Khan", QUOTE, "Muhammad", "Khan").verdict).toBe("UNCLEAR");
+  });
+
+  it("UNCLEAR when extra middle name and both names set", () => {
+    expect(checkName("Amina Begum Khan", QUOTE, "Amina", "Khan").verdict).toBe("UNCLEAR");
+  });
+
+  it("Ali does NOT match Alison — whole-word only", () => {
+    expect(checkName("Alison Khan", QUOTE, "Ali", "Khan").verdict).toBe("FAIL");
   });
 });
 
-describe("checkAmount", () => {
-  it("OK when document amount exceeds threshold", () => {
-    expect(checkAmount("£30000", QUOTE, "£29000").verdict).toBe("OK");
+describe("checkMrz", () => {
+  const VALID_LINE2 = "L898902C36UTO7408122F1204159ZE184226B<<<<<10";
+
+  it("OK when all check digits pass", () => {
+    const mrzValue = "P<UTOSURNAME<<GIVENNAMES<<<<<<<<<<<<<<<<<<<<\n" + VALID_LINE2;
+    expect(checkMrz(mrzValue, QUOTE).verdict).toBe("OK");
   });
 
-  it("OK when document amount exactly equals threshold", () => {
-    expect(checkAmount("£29000", QUOTE, "£29000").verdict).toBe("OK");
+  it("UNCLEAR when a check digit fails (possible misread)", () => {
+    const badLine2 = VALID_LINE2.slice(0, 9) + "9" + VALID_LINE2.slice(10);
+    const mrzValue = "P<UTOSURNAME<<GIVENNAMES<<<<<<<<<<<<<<<<<<<<\n" + badLine2;
+    const r = checkMrz(mrzValue, QUOTE);
+    expect(r.verdict).toBe("UNCLEAR");
+    expect(r.detail).toContain("misread");
   });
 
-  it("FAIL when document amount is below threshold", () => {
-    expect(checkAmount("£25000", QUOTE, "£29000").verdict).toBe("FAIL");
-  });
-
-  it("handles comma formatting in both value and threshold", () => {
-    expect(checkAmount("£29,500", QUOTE, "£29,000").verdict).toBe("OK");
-    expect(checkAmount("£28,999", QUOTE, "£29,000").verdict).toBe("FAIL");
-  });
-
-  it("UNCLEAR when value is not a parseable amount", () => {
-    expect(checkAmount("unknown", QUOTE, "£29000").verdict).toBe("UNCLEAR");
-  });
-
-  it("UNCLEAR when threshold is not parseable", () => {
-    expect(checkAmount("£29000", QUOTE, "at least the minimum").verdict).toBe("UNCLEAR");
-  });
-
-  it("detail string mentions the threshold", () => {
-    const r = checkAmount("£30000", QUOTE, "£29000");
-    expect(r.detail).toContain("£29000");
+  it("UNCLEAR for unreadable MRZ (wrong format)", () => {
+    expect(checkMrz("not an mrz", QUOTE).verdict).toBe("UNCLEAR");
   });
 });

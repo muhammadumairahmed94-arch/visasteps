@@ -1,15 +1,13 @@
-import type { User } from "@prisma/client";
 import { db } from "./db";
 import { ai } from "./adapters/ai";
 import type { AiSource, ExtractedFact } from "./adapters/ai";
 import { verifyAndAnnotateClaims, ensureFilePagesExtracted } from "./case-analysis";
 import { decrypt } from "./crypto";
-import { audit } from "./audit";
-import { limit } from "./ratelimit";
-import { NotFoundError, ForbiddenError } from "./errors";
-import { visibleCases } from "./documents";
 import { parseSingleUkDate } from "./number-check";
-import { ukToday, isDateInWindow } from "./date-window";
+import { isDateInWindow } from "./date-window";
+import { compareNames, crossDocNameConsistency } from "./name-check";
+import type { CrossDocNameEntry } from "./name-check";
+import { validateMrzLine2 } from "./mrz";
 
 const PURPOSE = "ai-question";
 
@@ -22,12 +20,54 @@ export interface DocumentCheck {
   factQuote?: string;
 }
 
+/** A single verified fact extracted from a document, for display in the case summary. */
+export interface SummaryFact {
+  factKind: string;
+  value: string;
+  docTitle: string;
+  uploaderKind: "CLIENT" | "SPONSOR";
+  fileId: string;
+  pageNumber: number;
+  quote: string;
+}
+
+/** A single payslip amount entry. */
+export interface PayslipEntry {
+  amount: number;
+  formattedAmount: string;
+  payPeriod: "monthly" | "weekly" | "annual" | "unknown";
+  dateFound: string | null;
+  docTitle: string;
+  quote: string;
+}
+
+/** Aggregated payslip data across all payslip documents. */
+export interface PayslipSummary {
+  entries: PayslipEntry[];
+  totalMonthly: number | null;   // sum of all monthly entries
+  totalWeekly: number | null;    // sum of all weekly entries
+  annualisedMonthly: number | null; // totalMonthly * 12
+  annualisedWeekly: number | null;  // totalWeekly * 52
+  averageMonthly: number | null; // mean of monthly entries
+}
+
+/** Cross-document name consistency result. */
+export interface CrossDocNameCheck {
+  person: "client" | "sponsor";
+  expectedName: string;
+  foundNames: { value: string; docTitle: string }[];
+  verdict: CheckVerdict;
+  detail: string;
+}
+
 export interface DocCheckResult {
   docId: string;
   title: string;
   folder: string;
+  uploaderKind: "CLIENT" | "SPONSOR";
   verdict: CheckVerdict;
   checks: DocumentCheck[];
+  summaryFacts: SummaryFact[];
 }
 
 function worstVerdict(checks: DocumentCheck[]): CheckVerdict {
@@ -65,28 +105,36 @@ export function checkDateWindow(value: string, quote: string, window: string, an
   return { name: "Document date", verdict: "FAIL", detail: `Dated ${value}, outside the required window.`, factQuote: quote };
 }
 
+/**
+ * Check a holder name from a document against the expected person's name.
+ * Uses whole-word matching; treats spelling variants and extra/missing middle names as UNCLEAR.
+ */
 export function checkName(
   value: string,
   quote: string,
-  firstName: string | null,
-  lastName: string | null,
+  expectedFirst: string | null,
+  expectedLast: string | null,
 ): DocumentCheck {
-  if (!firstName && !lastName) {
-    return { name: "Name check", verdict: "UNCLEAR", detail: "Client name not set.", factQuote: quote };
+  const result = compareNames(value, expectedFirst, expectedLast);
+  return { name: "Name check", verdict: result.verdict, detail: result.detail, factQuote: quote };
+}
+
+/** Validate MRZ check digits; return UNCLEAR if any fail. */
+export function checkMrz(mrzValue: string, quote: string): DocumentCheck {
+  const lines = mrzValue.split("\n");
+  if (lines.length < 2) {
+    return { name: "MRZ check digits", verdict: "UNCLEAR", detail: "Could not read the MRZ lines.", factQuote: quote };
   }
-  const lv = value.toLowerCase();
-  const firstOk = !firstName || lv.includes(firstName.toLowerCase());
-  const lastOk = !lastName || lv.includes(lastName.toLowerCase());
-  if (firstOk && lastOk) {
-    return { name: "Name check", verdict: "OK", detail: `Name "${value}" matches client.`, factQuote: quote };
+  const result = validateMrzLine2(lines[1]);
+  if (result.checks.length === 0) {
+    return { name: "MRZ check digits", verdict: "UNCLEAR", detail: "MRZ line 2 has wrong length — possible misread.", factQuote: quote };
   }
-  const expected = [firstName, lastName].filter(Boolean).join(" ");
-  return {
-    name: "Name check",
-    verdict: "FAIL",
-    detail: `Name "${value}" does not match client name "${expected}".`,
-    factQuote: quote,
-  };
+  const failed = result.checks.filter((c) => !c.valid);
+  if (failed.length > 0) {
+    const fields = failed.map((c) => c.field).join(", ");
+    return { name: "MRZ check digits", verdict: "UNCLEAR", detail: `MRZ check digits failed for: ${fields}. Possible misread.`, factQuote: quote };
+  }
+  return { name: "MRZ check digits", verdict: "OK", detail: "All MRZ check digits valid.", factQuote: quote };
 }
 
 function parseMoneyAmount(s: string): number | null {
@@ -94,25 +142,37 @@ function parseMoneyAmount(s: string): number | null {
   return isNaN(n) ? null : n;
 }
 
-export function checkAmount(value: string, quote: string, threshold: string): DocumentCheck {
-  const docAmt = parseMoneyAmount(value);
-  const threshAmt = parseMoneyAmount(threshold);
-  if (docAmt === null || threshAmt === null) {
-    return {
-      name: "Amount check",
-      verdict: "UNCLEAR",
-      detail: `Could not compare "${value}" against threshold "${threshold}".`,
-      factQuote: quote,
-    };
-  }
-  if (docAmt >= threshAmt) {
-    return { name: "Amount check", verdict: "OK", detail: `${value} meets the minimum of ${threshold}.`, factQuote: quote };
-  }
+function detectPayPeriod(quote: string): "monthly" | "weekly" | "annual" | "unknown" {
+  const q = quote.toLowerCase();
+  if (/per\s+month|monthly|month\b/.test(q)) return "monthly";
+  if (/per\s+week|weekly|week\b/.test(q)) return "weekly";
+  if (/per\s+annum|annually|annual|per\s+year|yearly/.test(q)) return "annual";
+  return "unknown";
+}
+
+function extractFirstDateFromQuote(quote: string): string | null {
+  const numMatch = quote.match(/\b\d{1,2}[/.]\d{1,2}[/.]\d{4}\b/);
+  if (numMatch) return numMatch[0];
+  const MONTHS = "January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec";
+  const namedMatch = quote.match(new RegExp(`\\b\\d{1,2}\\s+(?:${MONTHS})\\s+\\d{4}\\b`, "i"));
+  if (namedMatch) return namedMatch[0];
+  return null;
+}
+
+export function buildPayslipSummary(entries: PayslipEntry[]): PayslipSummary {
+  const monthly = entries.filter((e) => e.payPeriod === "monthly");
+  const weekly = entries.filter((e) => e.payPeriod === "weekly");
+
+  const totalMonthly = monthly.length > 0 ? monthly.reduce((s, e) => s + e.amount, 0) : null;
+  const totalWeekly = weekly.length > 0 ? weekly.reduce((s, e) => s + e.amount, 0) : null;
+
   return {
-    name: "Amount check",
-    verdict: "FAIL",
-    detail: `${value} is below the minimum of ${threshold}.`,
-    factQuote: quote,
+    entries,
+    totalMonthly,
+    totalWeekly,
+    annualisedMonthly: totalMonthly !== null ? Math.round(totalMonthly * 12) : null,
+    annualisedWeekly: totalWeekly !== null ? Math.round(totalWeekly * 52) : null,
+    averageMonthly: monthly.length > 0 ? Math.round(totalMonthly! / monthly.length) : null,
   };
 }
 
@@ -130,97 +190,180 @@ function verifyFacts(rawFacts: ExtractedFact[], pageMap: Map<string, string>): E
   return rawFacts.filter((f) => verifiedKeys.has(`${f.fileId}:${f.pageNumber}:${f.quote}`));
 }
 
-export async function checkDocuments(staff: User, clientId: string): Promise<DocCheckResult[]> {
-  const firm = await db.firm.findUniqueOrThrow({ where: { id: staff.firmId } });
-  if (!firm.aiEnabled) throw new ForbiddenError("AI analysis is not enabled for this firm.");
+/** Determine the dominant uploaderKind for a document (most files). */
+function docUploaderKind(files: { uploaderKind: string }[]): "CLIENT" | "SPONSOR" {
+  const sponsorCount = files.filter((f) => f.uploaderKind === "SPONSOR").length;
+  return sponsorCount > files.length / 2 ? "SPONSOR" : "CLIENT";
+}
 
-  await limit("docCheck", staff.id);
+function isPayslipDoc(title: string, typeKey: string): boolean {
+  const t = (title + " " + typeKey).toLowerCase();
+  return /payslip|pay\s*slip|salary\s*slip/.test(t);
+}
 
-  const client = await db.client.findFirst({
-    where: { id: clientId, ...visibleCases(staff) },
+export interface CheckDocumentsResult {
+  docs: DocCheckResult[];
+  payslipSummary: PayslipSummary;
+  crossDocNameChecks: CrossDocNameCheck[];
+}
+
+
+/**
+ * Run AI fact extraction + code-based checks on all saved documents for a client.
+ * Called by the doc-check background job (one doc at a time).
+ */
+export async function checkOneDocument(
+  docId: string,
+  clientFirstName: string | null,
+  clientLastName: string | null,
+  sponsorFirstName: string | null,
+  sponsorLastName: string | null,
+  anchor: Date,
+): Promise<DocCheckResult | null> {
+  const doc = await db.clientDocument.findUnique({
+    where: { id: docId },
     include: {
-      documents: {
-        include: {
-          checklistItem: { select: { title: true, folder: true, dateWindow: true, typeKey: true } },
-          files: { where: { storageStatus: "SAVED", supersededAt: null, oneDriveItemId: { not: null } } },
-        },
-      },
+      checklistItem: { select: { title: true, folder: true, dateWindow: true } },
+      files: { where: { storageStatus: "SAVED", supersededAt: null, oneDriveItemId: { not: null } } },
     },
   });
-  if (!client) throw new NotFoundError("Not found.");
+  if (!doc || doc.files.length === 0) return null;
 
-  const anchor = client.plannedSubmissionDate ?? ukToday();
+  const { title, folder, dateWindow } = doc.checklistItem;
+  const uploaderKind = docUploaderKind(doc.files);
+  const expectedFirst = uploaderKind === "SPONSOR" ? sponsorFirstName : clientFirstName;
+  const expectedLast = uploaderKind === "SPONSOR" ? sponsorLastName : clientLastName;
+  const person = uploaderKind === "SPONSOR" ? "Partner" : "Client";
 
-  const moneyReqs = await db.requirement.findMany({
-    where: { routeId: client.routeId, firmId: staff.firmId, ruleType: "MONEY_THRESHOLD", status: "APPROVED" },
-    select: { evidenceNeeded: true, limitOrThreshold: true },
-  });
+  const sources: AiSource[] = [];
+  const pageMap = new Map<string, string>();
 
-  const results: DocCheckResult[] = [];
-
-  for (const doc of client.documents) {
-    if (doc.files.length === 0) continue;
-
-    const { title, folder, dateWindow, typeKey } = doc.checklistItem;
-
-    const sources: AiSource[] = [];
-    const pageMap = new Map<string, string>();
-
-    for (const file of doc.files) {
-      await ensureFilePagesExtracted(file.id);
-      const pages = await db.clientFilePage.findMany({
-        where: { fileId: file.id },
-        orderBy: { pageNumber: "asc" },
+  for (const file of doc.files) {
+    await ensureFilePagesExtracted(file.id);
+    const pages = await db.clientFilePage.findMany({
+      where: { fileId: file.id },
+      orderBy: { pageNumber: "asc" },
+    });
+    for (const p of pages) {
+      const text = p.encryptedText ? decrypt(p.encryptedText, PURPOSE) : null;
+      if (p.isImage || !text) continue;
+      const prefix = file.uploaderKind === "SPONSOR" ? "Partner" : "Client";
+      sources.push({
+        label: `${prefix} document: ${title}, page ${p.pageNumber}`,
+        kind: "client-document",
+        fileId: file.id,
+        page: p.pageNumber,
+        text,
       });
-      for (const p of pages) {
-        const text = p.encryptedText ? decrypt(p.encryptedText, PURPOSE) : null;
-        if (p.isImage || !text) continue;
-        sources.push({
-          label: `Client document: ${title}, page ${p.pageNumber}`,
-          kind: "client-document",
-          fileId: file.id,
-          page: p.pageNumber,
-          text,
-        });
-        pageMap.set(`${file.id}:${p.pageNumber}`, text);
-      }
+      pageMap.set(`${file.id}:${p.pageNumber}`, text);
     }
-
-    if (sources.length === 0) continue;
-
-    const rawFacts = await ai().extractFacts({ sources });
-    const verifiedFacts = verifyFacts(rawFacts, pageMap);
-
-    const moneyThreshold =
-      moneyReqs
-        .filter(
-          (r) =>
-            r.limitOrThreshold &&
-            (r.evidenceNeeded.toLowerCase().includes(title.toLowerCase()) ||
-              r.evidenceNeeded.toLowerCase().includes(typeKey.toLowerCase())),
-        )
-        .map((r) => r.limitOrThreshold!)[0] ?? null;
-
-    const checks: DocumentCheck[] = [];
-
-    for (const fact of verifiedFacts) {
-      if (fact.factKind === "expiry-date") {
-        checks.push(checkExpiry(fact.value, fact.quote, anchor));
-      } else if (fact.factKind === "document-date") {
-        if (dateWindow) checks.push(checkDateWindow(fact.value, fact.quote, dateWindow, anchor));
-      } else if (fact.factKind === "holder-name") {
-        checks.push(checkName(fact.value, fact.quote, client.firstName ?? null, client.lastName ?? null));
-      } else if (fact.factKind === "amount") {
-        if (moneyThreshold) checks.push(checkAmount(fact.value, fact.quote, moneyThreshold));
-      }
-    }
-
-    if (checks.length === 0) continue;
-
-    results.push({ docId: doc.id, title, folder, verdict: worstVerdict(checks), checks });
   }
 
-  await audit({ firmId: staff.firmId, actorType: "USER", actorId: staff.id, action: "case.doccheck", targetId: clientId });
+  if (sources.length === 0) return null;
+
+  const rawFacts = await ai().extractFacts({ sources });
+  const verifiedFacts = verifyFacts(rawFacts, pageMap);
+
+  const checks: DocumentCheck[] = [];
+  const summaryFacts: SummaryFact[] = [];
+
+  for (const fact of verifiedFacts) {
+    const fileUploaderKind = (doc.files.find((f) => f.id === fact.fileId)?.uploaderKind ?? "CLIENT") as "CLIENT" | "SPONSOR";
+
+    // Add to summary facts for display
+    summaryFacts.push({
+      factKind: fact.factKind,
+      value: fact.value,
+      docTitle: title,
+      uploaderKind: fileUploaderKind,
+      fileId: fact.fileId,
+      pageNumber: fact.pageNumber,
+      quote: fact.quote,
+    });
+
+    // Run appropriate check
+    if (fact.factKind === "expiry-date") {
+      checks.push(checkExpiry(fact.value, fact.quote, anchor));
+    } else if (fact.factKind === "document-date") {
+      if (dateWindow) checks.push(checkDateWindow(fact.value, fact.quote, dateWindow, anchor));
+    } else if (fact.factKind === "holder-name") {
+      checks.push(checkName(fact.value, fact.quote, expectedFirst, expectedLast));
+      // The check name should reflect who the document belongs to
+      const lastCheck = checks[checks.length - 1];
+      lastCheck.name = `${person} name check`;
+    } else if (fact.factKind === "mrz") {
+      checks.push(checkMrz(fact.value, fact.quote));
+    }
+    // amount, date-of-birth, passport-number, address, relationship → summary only
+  }
+
+  if (checks.length === 0 && summaryFacts.length === 0) return null;
+
+  return { docId: doc.id, title, folder, uploaderKind, verdict: worstVerdict(checks), checks, summaryFacts };
+}
+
+/** Build cross-document name checks from a set of DocCheckResults. */
+export function buildCrossDocNameChecks(
+  docs: DocCheckResult[],
+  clientFirstName: string | null,
+  clientLastName: string | null,
+  sponsorFirstName: string | null,
+  sponsorLastName: string | null,
+): CrossDocNameCheck[] {
+  const results: CrossDocNameCheck[] = [];
+
+  for (const person of ["client", "sponsor"] as const) {
+    const isClient = person === "client";
+    const firstName = isClient ? clientFirstName : sponsorFirstName;
+    const lastName = isClient ? clientLastName : sponsorLastName;
+    if (!firstName && !lastName) continue;
+
+    const expectedName = [firstName, lastName].filter(Boolean).join(" ");
+    const targetUploaderKind = isClient ? "CLIENT" : "SPONSOR";
+
+    // Collect all holder-name facts from docs belonging to this person
+    const entries: CrossDocNameEntry[] = docs
+      .filter((d) => d.uploaderKind === targetUploaderKind)
+      .flatMap((d) =>
+        d.summaryFacts
+          .filter((f) => f.factKind === "holder-name")
+          .map((f) => ({ value: f.value, docTitle: d.title })),
+      );
+
+    if (entries.length < 2) continue; // need at least 2 names to compare
+
+    const consistency = crossDocNameConsistency(entries);
+    results.push({
+      person,
+      expectedName,
+      foundNames: entries,
+      verdict: consistency.verdict,
+      detail: consistency.detail,
+    });
+  }
 
   return results;
+}
+
+/** Collect payslip entries from all DocCheckResults. */
+export function collectPayslipEntries(docs: DocCheckResult[]): PayslipEntry[] {
+  const entries: PayslipEntry[] = [];
+  for (const doc of docs) {
+    const isPayslip = isPayslipDoc(doc.title, "");
+    if (!isPayslip) continue;
+    for (const fact of doc.summaryFacts) {
+      if (fact.factKind !== "amount") continue;
+      const amount = parseMoneyAmount(fact.value);
+      if (amount === null || amount <= 0) continue;
+      entries.push({
+        amount,
+        formattedAmount: fact.value,
+        payPeriod: detectPayPeriod(fact.quote),
+        dateFound: extractFirstDateFromQuote(fact.quote),
+        docTitle: doc.title,
+        quote: fact.quote,
+      });
+    }
+  }
+  return entries;
 }

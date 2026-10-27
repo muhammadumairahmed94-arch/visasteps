@@ -56,6 +56,21 @@ enum DraftSourceStatus {
   NO_TEXT
 }
 
+enum DocCheckRunStatus {
+  QUEUED
+  RUNNING
+  COMPLETE
+  FAILED
+}
+
+enum DocCheckItemStatus {
+  PENDING
+  RUNNING
+  DONE
+  FAILED
+  NO_TEXT
+}
+
 enum RequirementRuleType {
   DATE_LIMIT
   MONEY_THRESHOLD
@@ -89,6 +104,7 @@ model Firm {
   guidanceSources         GuidanceSource[]
   guidanceSourceTypes     GuidanceSourceType[]
   draftRuns               DraftRun[]
+  docCheckRuns            DocCheckRun[]
   requirements            Requirement[]
   mentionedSources        MentionedSource[]
   checklistSuggestions    ChecklistSuggestion[]
@@ -121,6 +137,7 @@ model User {
   guidanceReviewed     GuidanceSource[] @relation("guidance_reviewed_by")
   guidanceOwnerRoutes  Route[]          @relation("guidance_route_owner")
   initiatedDraftRuns   DraftRun[]       @relation("draft_run_initiated_by")
+  initiatedDocCheckRuns DocCheckRun[]   @relation("doc_check_run_initiated_by")
   reviewedRequirements Requirement[]    @relation("requirement_reviewed_by")
   aiQuestionsAsked     AiQuestion[]     @relation("ai_question_asked_by")
 }
@@ -163,6 +180,7 @@ model Client {
   uploadSessions   UploadSession[]
   messages         Message[]
   aiQuestions      AiQuestion[]
+  docCheckRuns     DocCheckRun[]
 
   @@unique([firmId, caseRef])
   @@index([sponsorForClientId])
@@ -224,6 +242,7 @@ model ClientDocument {
   updatedAt          DateTime @updatedAt
   files              FileUpload[]
   uploadSessions     UploadSession[]
+  docCheckItems      DocCheckItem[]
 
   @@unique([clientId, checklistItemId])
 }
@@ -610,6 +629,41 @@ model GuidanceSourceType {
   firm     Firm             @relation(fields: [firmId], references: [id])
   route    Route            @relation(fields: [routeId], references: [id])
   sources  GuidanceSource[]
+}
+
+/** A background run of AI document fact-checking for one client. */
+model DocCheckRun {
+  id            String             @id @default(cuid())
+  clientId      String
+  firmId        String
+  initiatedById String
+  status        DocCheckRunStatus  @default(QUEUED)
+  createdAt     DateTime           @default(now())
+  startedAt     DateTime?
+  completedAt   DateTime?
+
+  client        Client             @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  firm          Firm               @relation(fields: [firmId], references: [id])
+  initiatedBy   User               @relation("doc_check_run_initiated_by", fields: [initiatedById], references: [id])
+  items         DocCheckItem[]
+
+  @@index([clientId, createdAt])
+  @@index([status])
+}
+
+/** Progress tracking for one client document within a DocCheckRun. */
+model DocCheckItem {
+  id              String             @id @default(cuid())
+  runId           String
+  docId           String
+  status          DocCheckItemStatus @default(PENDING)
+  errorMessage    String?
+  encryptedResult String?            // JSON: DocCheckResult for this doc, encrypted
+
+  run             DocCheckRun        @relation(fields: [runId], references: [id], onDelete: Cascade)
+  doc             ClientDocument     @relation(fields: [docId], references: [id], onDelete: Cascade)
+
+  @@unique([runId, docId])
 }
 
 /** Many-to-many: one guidance source can cover multiple visa routes. */
