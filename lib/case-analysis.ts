@@ -8,7 +8,7 @@ import { audit } from "./audit";
 import { limit } from "./ratelimit";
 import { NotFoundError, ForbiddenError } from "./errors";
 import { visibleCases } from "./documents";
-import { numbersInQuote } from "./draft-runs";
+import { numbersMatch } from "./number-check";
 
 const PURPOSE = "ai-question";
 const IMAGE_TOKEN_ESTIMATE = 1700;
@@ -195,7 +195,7 @@ export function verifyAndAnnotateClaims(
 
     const quoteFound = normPage.includes(normQuote);
     const longEnough = wordCount >= 8 && normQuote.length >= 40;
-    const numbersOk = !numbersInQuote || numbersInQuote(claim.claimText, claim.quote);
+    const numbersOk = numbersMatch(claim.claimText, claim.quote);
 
     const verified = quoteFound && longEnough && numbersOk;
     if (verified) result.push({ ...claim, verified: true });

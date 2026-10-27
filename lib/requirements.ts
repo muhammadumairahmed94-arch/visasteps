@@ -5,7 +5,7 @@ import { audit } from "./audit";
 import { limit } from "./ratelimit";
 import { decrypt } from "./crypto";
 import { UserError } from "./errors";
-import { numbersInQuote } from "./draft-runs";
+import { numbersMatch } from "./number-check";
 
 const PURPOSE = "guidance-text";
 
@@ -108,7 +108,7 @@ export async function editRequirement(admin: User, requirementId: string, rawEdi
 
   if (edits.citationQuote !== undefined || edits.limitOrThreshold !== undefined) {
     const finalThreshold = edits.limitOrThreshold !== undefined ? edits.limitOrThreshold : req.limitOrThreshold;
-    if (finalThreshold && !numbersInQuote(finalThreshold, newQuote)) {
+    if (finalThreshold && !numbersMatch(finalThreshold, newQuote)) {
       throw new UserError("The number or amount stated in the limit must appear verbatim in the quote.");
     }
   }

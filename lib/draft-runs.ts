@@ -2,6 +2,7 @@ import { db } from "./db";
 import { ai } from "./adapters/ai";
 import { decrypt } from "./crypto";
 import type { RequirementDraft } from "./adapters/ai";
+import { numbersMatch } from "./number-check";
 
 const PURPOSE = "guidance-text";
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
@@ -61,7 +62,7 @@ export function classifyDrafts(
       continue;
     }
 
-    if (d.limitOrThreshold && !numbersInQuote(d.limitOrThreshold, d.citationQuote)) {
+    if (d.limitOrThreshold && !numbersMatch(d.limitOrThreshold, d.citationQuote)) {
       rejected.push({ draft: d, reason: "number not in quote" });
       continue;
     }

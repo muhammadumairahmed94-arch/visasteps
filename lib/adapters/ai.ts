@@ -114,6 +114,7 @@ const CASE_ANALYSIS_SYSTEM_PROMPT =
   "\"notFound\" (boolean — true only when the answer genuinely cannot be found in any source). " +
   "Each quote must be a verbatim substring of the cited source. " +
   "Do not invent quotes or cite sources you have not been given. " +
+  "Copy figures and dates exactly as they appear in the source. Do not put page numbers in claim text. " +
   "Do not use any external tools or browse the web.";
 
 function cleanLabel(raw: string): string {
