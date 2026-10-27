@@ -30,6 +30,8 @@ import {
   evalsDir,
 } from "../lib/eval-fixtures.js";
 import type { EvalFixture } from "../lib/eval-fixtures.js";
+import { db } from "../lib/db.js";
+import { decrypt } from "../lib/crypto.js";
 
 // ─── types ────────────────────────────────────────────────────────────────────
 
@@ -984,16 +986,41 @@ for (const evalCase of CASES) {
   totalVerified += verified;
 }
 
-// Saved fixtures from evals/
-const fixtures = readEvalFixtures(evalsDir());
-if (fixtures.length > 0) {
-  console.log(`Loading ${fixtures.length} saved fixture(s) from evals/…`);
-  for (const fixture of fixtures) {
+// Saved fixtures from evals/ (synthetic, developer-written)
+const diskFixtures = readEvalFixtures(evalsDir());
+if (diskFixtures.length > 0) {
+  console.log(`Loading ${diskFixtures.length} disk fixture(s) from evals/…`);
+  for (const fixture of diskFixtures) {
     const { result, extracted, verified } = await runFixture(fixture);
     allResults.push(result);
     totalExtracted += extracted;
     totalVerified += verified;
   }
+}
+
+// Saved fixtures from database (admin-created from real disagreed results)
+try {
+  const dbRows = await db.evalFixture.findMany({ select: { id: true, encryptedData: true } });
+  if (dbRows.length > 0) {
+    console.log(`Loading ${dbRows.length} database fixture(s)…`);
+    for (const row of dbRows) {
+      let fixture: EvalFixture;
+      try {
+        fixture = JSON.parse(decrypt(row.encryptedData, "eval-fixture")) as EvalFixture;
+      } catch {
+        console.warn(`  ⚠ Could not decrypt fixture ${row.id} — skipping`);
+        continue;
+      }
+      const { result, extracted, verified } = await runFixture(fixture);
+      allResults.push(result);
+      totalExtracted += extracted;
+      totalVerified += verified;
+    }
+  }
+} catch (err) {
+  console.warn("  ⚠ Could not load database fixtures (DB unavailable?):", (err as Error).message);
+} finally {
+  await db.$disconnect();
 }
 
 const stats: EvalStats = {

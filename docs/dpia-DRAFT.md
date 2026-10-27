@@ -23,6 +23,7 @@ Large volumes of identity documents (passports), financial records and some **sp
   encrypted nightly database backups); Hostinger email (notifications).
 - **Volume:** [expected clients per year ___ ; documents per client ~10–20].
 - **Retention:** [to be set — see section 6, risk R7].
+- **AI test cases:** admins may save a disagreed AI guidance-check result as an eval fixture. Before saving, the admin must manually replace all personal details with synthetic stand-ins and confirm they have done so; the portal applies automatic first-pass scrubbing (names, dates of birth, passport numbers, NI numbers, sort codes, account numbers, IBANs, postcodes, phone numbers). The resulting fixture is stored encrypted (AES-256-GCM) in the database, never on disk or in version control. These fixtures are used only to test and improve the AI pipeline and must never contain real personal data. The save action is admin-only, rate-limited, and audit-logged.
 
 ## 3. Consultation
 

@@ -124,6 +124,7 @@ model Firm {
   mentionedSources        MentionedSource[]
   checklistSuggestions    ChecklistSuggestion[]
   aiQuestions             AiQuestion[]
+  evalFixtures            EvalFixture[]
 }
 
 model User {
@@ -157,6 +158,7 @@ model User {
   guidanceCheckResponses     GuidanceCheckResponse[]
   reviewedRequirements Requirement[]    @relation("requirement_reviewed_by")
   aiQuestionsAsked     AiQuestion[]     @relation("ai_question_asked_by")
+  createdEvalFixtures  EvalFixture[]    @relation("eval_fixture_created_by")
 }
 
 model Client {
@@ -758,4 +760,22 @@ model GuidanceSourceOnRoute {
   route    Route          @relation(fields: [routeId], references: [id])
 
   @@id([sourceId, routeId])
+}
+
+/**
+ * Admin-created eval fixture derived from a real disagreed guidance-check result.
+ * The admin scrubs all PII before saving. The entire EvalFixture JSON is stored
+ * encrypted (AES-256-GCM) so raw fixture data never sits in plaintext in the DB.
+ * Used by npm run ai:eval to test the real AI pipeline against known-answer cases.
+ */
+model EvalFixture {
+  id            String   @id @default(cuid())
+  firmId        String
+  firm          Firm     @relation(fields: [firmId], references: [id], onDelete: Cascade)
+  createdById   String
+  createdBy     User     @relation("eval_fixture_created_by", fields: [createdById], references: [id], onDelete: Restrict)
+  createdAt     DateTime @default(now())
+  encryptedData String   // JSON EvalFixture struct, AES-256-GCM with purpose "eval-fixture"
+
+  @@index([firmId, createdAt])
 }

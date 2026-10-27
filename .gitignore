@@ -54,3 +54,6 @@ next-env.d.ts
 /e2e-queue
 /test-results
 /playwright-report
+
+# eval fixtures — real-case fixtures live in the database; never commit JSON here
+/evals/*.json

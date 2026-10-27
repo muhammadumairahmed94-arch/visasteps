@@ -80,6 +80,25 @@ function CoveragePanel({ coverage }: { coverage: GuidanceCheckRunResult["coverag
   );
 }
 
+interface TestCasePage {
+  docId: string;
+  title: string;
+  uploaderKind: "CLIENT" | "SPONSOR";
+  pageNumber: number;
+  text: string;
+}
+
+interface TestCasePreview {
+  requirement: {
+    id: string; whatIsChecked: string; ruleType: string;
+    limitOrThreshold: string | null; evidenceNeeded: string; citationQuote: string;
+  };
+  pages: TestCasePage[];
+  expectedVerdict: string;
+  caseworkerNote: string | null;
+  route: string;
+}
+
 interface RequirementCardProps {
   item: GuidanceCheckItemResult;
   clientId: string;
@@ -96,21 +115,59 @@ function RequirementCard({ item, clientId, runId, itemId, responses, isAdmin, on
   const [note, setNote] = useState("");
   const [showNote, setShowNote] = useState(false);
   const [pendingAction, setPendingAction] = useState<"AGREED" | "DISAGREE" | null>(null);
-  const [savingTestCase, setSavingTestCase] = useState(false);
-  const [testCaseSaved, setTestCaseSaved] = useState(false);
+
+  // Test-case save state machine
+  const [tcStep, setTcStep] = useState<"idle" | "loading" | "editing" | "saving" | "saved">("idle");
+  const [tcPreview, setTcPreview] = useState<TestCasePreview | null>(null);
+  const [tcPages, setTcPages] = useState<TestCasePage[]>([]);
+  const [tcConfirmed, setTcConfirmed] = useState(false);
+  const [tcError, setTcError] = useState<string | null>(null);
 
   const hasDisagreed = responses.some((r) => r.action === "DISAGREE");
 
-  async function saveTestCase(expectedVerdict: string) {
-    setSavingTestCase(true);
-    const r = await api<{ ok: boolean }>(
-      `/api/staff/cases/${clientId}/guidance-check/${runId}/${itemId}/save-test-case`,
-      { method: "POST", body: JSON.stringify({ expectedVerdict }) },
+  const ENDPOINT = `/api/staff/cases/${clientId}/guidance-check/${runId}/${itemId}/save-test-case`;
+
+  async function startPreview(expectedVerdict: string) {
+    setTcStep("loading");
+    setTcError(null);
+    const r = await api<{ ok: boolean; preview: TestCasePreview }>(
+      ENDPOINT,
+      { method: "POST", body: JSON.stringify({ action: "preview", expectedVerdict }) },
     );
-    setSavingTestCase(false);
-    if (!r.ok) { toast(r.error); return; }
-    setTestCaseSaved(true);
-    toast("Test case saved to evals/.");
+    if (!r.ok) {
+      setTcStep("idle");
+      setTcError(r.error);
+      return;
+    }
+    setTcPreview(r.data.preview);
+    setTcPages(r.data.preview.pages.map((p) => ({ ...p })));
+    setTcConfirmed(false);
+    setTcStep("editing");
+  }
+
+  async function confirmSave() {
+    if (!tcPreview || !tcConfirmed) return;
+    setTcStep("saving");
+    setTcError(null);
+    const r = await api<{ ok: boolean; fixtureId: string }>(
+      ENDPOINT,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          action: "confirm",
+          expectedVerdict: tcPreview.expectedVerdict,
+          pages: tcPages,
+          confirmed: true,
+        }),
+      },
+    );
+    if (!r.ok) {
+      setTcStep("editing");
+      setTcError(r.error);
+      return;
+    }
+    setTcStep("saved");
+    toast("Test case saved.");
   }
 
   async function respond(action: "AGREED" | "DISAGREE") {
@@ -124,15 +181,13 @@ function RequirementCard({ item, clientId, runId, itemId, responses, isAdmin, on
     setPendingAction(null);
     setNote("");
     setShowNote(false);
-    // Optimistically update responses list
-    const existing = responses.filter(() => true); // fresh from server on next poll
     const newResp: GuidanceCheckItemResponse = {
       action,
       note: note.trim() || null,
       staffName: "You",
       createdAt: new Date().toISOString(),
     };
-    onRespond(item.requirementId, [...existing.filter((rr) => rr.staffName !== "You"), newResp]);
+    onRespond(item.requirementId, [...responses.filter((rr) => rr.staffName !== "You"), newResp]);
   }
 
   return (
@@ -183,25 +238,104 @@ function RequirementCard({ item, clientId, runId, itemId, responses, isAdmin, on
 
       {/* Admin: save as test case (only after a DISAGREE response) */}
       {isAdmin && hasDisagreed && (
-        <div className="guidance-respond-row">
-          {testCaseSaved ? (
-            <span className="small muted">Test case saved.</span>
-          ) : (
-            <>
-              <span className="small muted">Save as test case with expected verdict:</span>
+        <div className="guidance-test-case-panel">
+          {tcStep === "idle" && (
+            <div className="guidance-respond-row">
+              <span className="small muted">Save as test case — expected verdict:</span>
               {(["MET", "NOT_MET", "UNCLEAR"] as const).map((v) => (
                 <button
                   key={v}
                   type="button"
                   className="btn-small"
-                  disabled={savingTestCase}
-                  onClick={() => saveTestCase(v)}
-                  aria-label={`Save as test case with expected verdict ${v}`}
+                  onClick={() => startPreview(v)}
+                  aria-label={`Save as test case — expected verdict ${v}`}
                 >
-                  {savingTestCase ? "Saving…" : v}
+                  {v}
                 </button>
               ))}
-            </>
+            </div>
+          )}
+
+          {tcStep === "loading" && (
+            <p className="small muted">Loading scrubbed text…</p>
+          )}
+
+          {tcError && (
+            <p className="small error" role="alert">{tcError}</p>
+          )}
+
+          {(tcStep === "editing" || tcStep === "saving") && tcPreview && (
+            <div className="tc-editor">
+              <div className="tc-warning" role="alert">
+                <strong>Before saving:</strong> Replace every real detail with made-up ones.
+                Real names, numbers, accounts, employers and addresses must not remain.
+                The text below has been pre-scrubbed but you must check it carefully.
+              </div>
+
+              <p className="small muted">
+                Requirement: <strong>{tcPreview.requirement.whatIsChecked}</strong>
+                {tcPreview.requirement.limitOrThreshold && (
+                  <> — {tcPreview.requirement.limitOrThreshold}</>
+                )}
+              </p>
+              <p className="small muted">
+                Expected verdict: <strong>{tcPreview.expectedVerdict}</strong>
+              </p>
+
+              {tcPages.map((page, i) => (
+                <div key={i} className="tc-page-editor">
+                  <label className="small muted" htmlFor={`tc-page-${item.requirementId}-${i}`}>
+                    {page.title} — page {page.pageNumber} ({page.uploaderKind.toLowerCase()})
+                  </label>
+                  <textarea
+                    id={`tc-page-${item.requirementId}-${i}`}
+                    className="small tc-page-text"
+                    rows={8}
+                    maxLength={50000}
+                    disabled={tcStep === "saving"}
+                    value={page.text}
+                    onChange={(e) => {
+                      const updated = [...tcPages];
+                      updated[i] = { ...updated[i]!, text: e.target.value };
+                      setTcPages(updated);
+                    }}
+                  />
+                </div>
+              ))}
+
+              <label className="tc-confirm-label small">
+                <input
+                  type="checkbox"
+                  checked={tcConfirmed}
+                  disabled={tcStep === "saving"}
+                  onChange={(e) => setTcConfirmed(e.target.checked)}
+                />
+                {" "}I have removed all real personal details from the text above.
+              </label>
+
+              <div className="guidance-respond-row">
+                <button
+                  type="button"
+                  className="btn-small btn-primary"
+                  disabled={!tcConfirmed || tcStep === "saving"}
+                  onClick={confirmSave}
+                >
+                  {tcStep === "saving" ? "Saving…" : "Save test case"}
+                </button>
+                <button
+                  type="button"
+                  className="btn-small"
+                  disabled={tcStep === "saving"}
+                  onClick={() => { setTcStep("idle"); setTcPreview(null); setTcError(null); }}
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
+
+          {tcStep === "saved" && (
+            <p className="small muted">Test case saved.</p>
           )}
         </div>
       )}
