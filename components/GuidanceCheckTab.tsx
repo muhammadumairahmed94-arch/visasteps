@@ -97,6 +97,7 @@ interface TestCasePreview {
   expectedVerdict: string;
   caseworkerNote: string | null;
   route: string;
+  anchorDate: string;
 }
 
 interface RequirementCardProps {
@@ -158,6 +159,7 @@ function RequirementCard({ item, clientId, runId, itemId, responses, isAdmin, on
           expectedVerdict: tcPreview.expectedVerdict,
           pages: tcPages,
           confirmed: true,
+          anchorDate: tcPreview.anchorDate,
         }),
       },
     );
@@ -269,7 +271,9 @@ function RequirementCard({ item, clientId, runId, itemId, responses, isAdmin, on
               <div className="tc-warning" role="alert">
                 <strong>Before saving:</strong> Replace every real detail with made-up ones.
                 Real names, numbers, accounts, employers and addresses must not remain.
-                The text below has been pre-scrubbed but you must check it carefully.
+                The text has been pre-scrubbed but you must check it carefully.
+                Check any remaining dates are not personal — for example a date of birth
+                written in an unusual way.
               </div>
 
               <p className="small muted">

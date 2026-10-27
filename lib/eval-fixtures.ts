@@ -59,6 +59,39 @@ export async function buildTextPdf(text: string): Promise<Buffer> {
 
 // ─── PII scrubbing ────────────────────────────────────────────────────────────
 
+// ─── label-aware DOB scrubbing ────────────────────────────────────────────────
+
+// Matches "date of birth", "dob", "d.o.b.", "born", "birth date" (case-insensitive)
+const DOB_LABEL = String.raw`(?:date\s+of\s+birth|d\.?\s*o\.?\s*b\.?|born(?:\s+on)?|birth\s+date)`;
+// Separator between label and date value: colon, spaces, comma (up to 10 chars)
+const DOB_SEP = String.raw`[:\s,]{0,12}`;
+// All supported date formats as one alternation
+const DATE_BLOCK = [
+  String.raw`(?:19|20)\d{2}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01])`,          // YYYY-MM-DD
+  String.raw`(?:0?[1-9]|[12]\d|3[01])[\/\-.](?:0?[1-9]|1[0-2])[\/\-.](?:19|20)\d{2}`, // DD/MM/YYYY etc.
+  String.raw`(?:0?[1-9]|[12]\d|3[01])\s+(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+(?:19|20)\d{2}`, // DD Month YYYY
+  String.raw`(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+(?:0?[1-9]|[12]\d|3[01]),?\s+(?:19|20)\d{2}`, // Month DD, YYYY
+].join("|");
+
+/**
+ * Replace date values that are clearly labelled as a date of birth.
+ * Dates without a DOB label (expiry dates, pay dates, etc.) are left intact
+ * because they are typically what the test case is testing.
+ */
+function scrubLabelledDobs(text: string): string {
+  // Label before value: "Date of birth: 14/05/1988"
+  let out = text.replace(
+    new RegExp(`(${DOB_LABEL}${DOB_SEP})(${DATE_BLOCK})`, "gi"),
+    (_, label) => label + "01/01/1990",
+  );
+  // Value before label: "14/05/1988 (date of birth)"
+  out = out.replace(
+    new RegExp(`(${DATE_BLOCK})(${DOB_SEP}${DOB_LABEL})`, "gi"),
+    (_, _date, labelPart) => "01/01/1990" + labelPart,
+  );
+  return out;
+}
+
 const FAKE_NAME_POOL = [
   "Alex Sample", "Jordan Sample", "Casey Sample", "Taylor Sample",
   "Riley Sample", "Morgan Sample", "Avery Sample", "Quinn Sample",
@@ -167,24 +200,10 @@ export function piiScrub(
     return match;
   });
 
-  // Dates of birth in various formats (regex fallback, covers formats not in knownPii)
-  // YYYY-MM-DD  (ISO)
-  out = out.replace(/\b(19|20)\d{2}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])\b/g, "1990-01-01");
-  // DD/MM/YYYY or DD-MM-YYYY or DD.MM.YYYY
-  out = out.replace(
-    /\b(0?[1-9]|[12]\d|3[01])[\/\-.](0?[1-9]|1[0-2])[\/\-.](19|20)\d{2}\b/g,
-    "01/01/1990",
-  );
-  // DD Month YYYY  (e.g. 14 May 1988)
-  out = out.replace(
-    /\b(0?[1-9]|[12]\d|3[01])\s+(January|February|March|April|May|June|July|August|September|October|November|December)\s+(19|20)\d{2}\b/gi,
-    "1 January 1990",
-  );
-  // Month DD, YYYY  (e.g. May 14, 1988)
-  out = out.replace(
-    /\b(January|February|March|April|May|June|July|August|September|October|November|December)\s+(0?[1-9]|[12]\d|3[01]),?\s+(19|20)\d{2}\b/gi,
-    "January 1, 1990",
-  );
+  // Dates of birth — only when clearly labelled as a DOB.
+  // Unlabelled dates (expiry dates, payslip dates, etc.) are preserved because
+  // they are usually what the test case is actually testing.
+  out = scrubLabelledDobs(out);
 
   // MRZ lines: 44-char lines of uppercase letters, digits and <
   // First char may be a letter (line 1, e.g. 'P') or digit (line 2 of passport MRZ).
@@ -218,6 +237,8 @@ export interface EvalFixturePage {
 export interface EvalFixture {
   id: string;
   createdAt: string;
+  /** ISO date string used as the "today" anchor when evaluating this fixture. */
+  anchorDate: string;
   route: string;
   requirement: {
     id: string;

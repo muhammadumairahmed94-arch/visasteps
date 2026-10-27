@@ -773,7 +773,7 @@ async function runFixture(fixture: EvalFixture): Promise<{
   extracted: number;
   verified: number;
 }> {
-  const anchor = DEFAULT_ANCHOR;
+  const anchor = fixture.anchorDate ? new Date(fixture.anchorDate) : DEFAULT_ANCHOR;
 
   const allSources: AiSource[] = [];
   const allPageMap = new Map<string, string>();

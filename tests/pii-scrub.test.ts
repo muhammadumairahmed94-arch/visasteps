@@ -103,42 +103,62 @@ describe("IBANs", () => {
   });
 });
 
-// ─── Dates of birth in various formats ───────────────────────────────────────
+// ─── Dates of birth — only scrubbed when labelled ────────────────────────────
 
-describe("Dates of birth — various formats", () => {
-  it("ISO YYYY-MM-DD → 1990-01-01", () => {
+describe("Dates of birth — labelled → scrubbed", () => {
+  it("ISO YYYY-MM-DD after 'Born:'", () => {
     const result = piiScrub("Born: 1988-05-14.", NO_PII);
-    expect(result).toContain("1990-01-01");
+    expect(result).toContain("01/01/1990");
     expect(result).not.toContain("1988-05-14");
   });
-  it("DD/MM/YYYY → 01/01/1990", () => {
+  it("DD/MM/YYYY after 'Date of birth:'", () => {
     const result = piiScrub("Date of birth: 14/05/1988.", NO_PII);
     expect(result).toContain("01/01/1990");
     expect(result).not.toContain("14/05/1988");
   });
-  it("DD-MM-YYYY → 01/01/1990", () => {
+  it("DD-MM-YYYY after 'DOB:'", () => {
     const result = piiScrub("DOB: 14-05-1988.", NO_PII);
     expect(result).toContain("01/01/1990");
     expect(result).not.toContain("14-05-1988");
   });
-  it("DD.MM.YYYY → 01/01/1990", () => {
+  it("DD.MM.YYYY after 'Born'", () => {
     const result = piiScrub("Born 14.05.1988.", NO_PII);
     expect(result).toContain("01/01/1990");
     expect(result).not.toContain("14.05.1988");
   });
-  it("DD Month YYYY → 1 January 1990", () => {
+  it("DD Month YYYY after 'Date of birth:'", () => {
     const result = piiScrub("Date of birth: 14 May 1988.", NO_PII);
-    expect(result).toContain("1 January 1990");
+    expect(result).toContain("01/01/1990");
     expect(result).not.toContain("14 May 1988");
   });
-  it("Month DD, YYYY → January 1, 1990", () => {
+  it("Month DD, YYYY after 'Born:'", () => {
     const result = piiScrub("Born: May 14, 1988.", NO_PII);
-    expect(result).toContain("January 1, 1990");
+    expect(result).toContain("01/01/1990");
     expect(result).not.toContain("May 14, 1988");
   });
-  it("Month DD YYYY (no comma) → January 1, 1990", () => {
-    const result = piiScrub("Born: May 14 1988.", NO_PII);
-    expect(result).toContain("January 1, 1990");
+  it("D.O.B. label scrubs date", () => {
+    const result = piiScrub("D.O.B.: 14/05/1988.", NO_PII);
+    expect(result).toContain("01/01/1990");
+    expect(result).not.toContain("14/05/1988");
+  });
+});
+
+describe("Dates without DOB label — preserved", () => {
+  it("document expiry date → not scrubbed", () => {
+    const result = piiScrub("This document expires on 15/12/2030.", NO_PII);
+    expect(result).toContain("15/12/2030");
+  });
+  it("payslip pay date → not scrubbed", () => {
+    const result = piiScrub("Pay date: 28/01/2027.", NO_PII);
+    expect(result).toContain("28/01/2027");
+  });
+  it("ISO application date → not scrubbed", () => {
+    const result = piiScrub("Run date: 2027-04-01.", NO_PII);
+    expect(result).toContain("2027-04-01");
+  });
+  it("'issued' date → not scrubbed", () => {
+    const result = piiScrub("Certificate issued: 15 March 2026.", NO_PII);
+    expect(result).toContain("15 March 2026");
   });
 });
 

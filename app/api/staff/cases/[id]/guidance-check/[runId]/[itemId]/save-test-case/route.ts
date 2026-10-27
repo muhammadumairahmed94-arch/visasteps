@@ -37,6 +37,7 @@ const ConfirmInput = z.object({
   expectedVerdict: z.enum(VERDICTS),
   pages: z.array(PageSchema).min(1).max(200),
   confirmed: z.literal(true),
+  anchorDate: z.string().datetime(),
 });
 
 const Input = z.discriminatedUnion("action", [PreviewInput, ConfirmInput]);
@@ -51,7 +52,7 @@ async function resolveItem(
 ) {
   const client = await db.client.findFirst({
     where: { id: clientId, ...visibleCases(me as Parameters<typeof visibleCases>[0]) },
-    select: { id: true, firmId: true, route: { select: { name: true } } },
+    select: { id: true, firmId: true, route: { select: { name: true } }, plannedSubmissionDate: true },
   });
   if (!client) return null;
 
@@ -62,6 +63,7 @@ async function resolveItem(
       requirementId: true,
       requirementSnapshot: true,
       encryptedResult: true,
+      run: { select: { createdAt: true } },
       responses: {
         where: { action: "DISAGREE" },
         select: { note: true },
@@ -185,6 +187,9 @@ export const POST = handler(
         throw new UserError("No uploaded page text found for the linked documents.");
       }
 
+      // Anchor: use the client's planned submission date, or when the run was created
+      const anchorDate = (client.plannedSubmissionDate ?? item.run.createdAt).toISOString();
+
       return json({
         ok: true,
         preview: {
@@ -194,17 +199,19 @@ export const POST = handler(
           expectedVerdict: input.expectedVerdict,
           caseworkerNote: item.responses[0]?.note ?? null,
           route: client.route.name,
+          anchorDate,
         },
       });
     }
 
     // ── CONFIRM ───────────────────────────────────────────────────────────────
     // input.action === "confirm"
-    const { expectedVerdict, pages } = input;
+    const { expectedVerdict, pages, anchorDate } = input;
 
     const fixture: EvalFixture = {
       id: randomUUID(),
       createdAt: new Date().toISOString(),
+      anchorDate,
       route: client.route.name,
       requirement: { id: item.requirementId, ...reqSnap },
       linkedItemStatuses: pages
