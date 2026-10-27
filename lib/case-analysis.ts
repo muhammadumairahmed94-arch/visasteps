@@ -19,7 +19,7 @@ function normalise(text: string): string {
   return text.replace(/\s+/g, " ").replace(/­/g, "").toLowerCase();
 }
 
-async function extractPdfPages(buffer: Buffer): Promise<Array<{ pageNumber: number; text: string | null }>> {
+export async function extractPdfPages(buffer: Buffer): Promise<Array<{ pageNumber: number; text: string | null }>> {
   const { resolve } = await import("node:path");
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let pdfjsLib: any;

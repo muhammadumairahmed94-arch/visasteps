@@ -96,6 +96,7 @@ export const TEXT: Record<string, string> = {
   "case.guidancecheck":         "Guidance check run",
   "case.guidancecheck.agree":   "Agreed with guidance check result",
   "case.guidancecheck.disagree": "Disagreed with guidance check result",
+  "case.guidancecheck.savetestcase": "Saved disagreed result as eval test case",
   // Requirements
   "requirement.draft":             "Requirements draft started",
   "requirement.edit":              "Draft requirement edited",

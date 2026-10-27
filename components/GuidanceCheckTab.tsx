@@ -8,6 +8,7 @@ import { api } from "./ui";
 interface Props {
   clientId: string;
   aiEnabled: boolean;
+  isAdmin: boolean;
   toast: (msg: string) => void;
 }
 
@@ -85,15 +86,32 @@ interface RequirementCardProps {
   runId: string;
   itemId: string;
   responses: GuidanceCheckItemResponse[];
+  isAdmin: boolean;
   onRespond: (requirementId: string, responses: GuidanceCheckItemResponse[]) => void;
   toast: (msg: string) => void;
 }
 
-function RequirementCard({ item, clientId, runId, itemId, responses, onRespond, toast }: RequirementCardProps) {
+function RequirementCard({ item, clientId, runId, itemId, responses, isAdmin, onRespond, toast }: RequirementCardProps) {
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState("");
   const [showNote, setShowNote] = useState(false);
   const [pendingAction, setPendingAction] = useState<"AGREED" | "DISAGREE" | null>(null);
+  const [savingTestCase, setSavingTestCase] = useState(false);
+  const [testCaseSaved, setTestCaseSaved] = useState(false);
+
+  const hasDisagreed = responses.some((r) => r.action === "DISAGREE");
+
+  async function saveTestCase(expectedVerdict: string) {
+    setSavingTestCase(true);
+    const r = await api<{ ok: boolean }>(
+      `/api/staff/cases/${clientId}/guidance-check/${runId}/${itemId}/save-test-case`,
+      { method: "POST", body: JSON.stringify({ expectedVerdict }) },
+    );
+    setSavingTestCase(false);
+    if (!r.ok) { toast(r.error); return; }
+    setTestCaseSaved(true);
+    toast("Test case saved to evals/.");
+  }
 
   async function respond(action: "AGREED" | "DISAGREE") {
     setBusy(true);
@@ -163,6 +181,31 @@ function RequirementCard({ item, clientId, runId, itemId, responses, onRespond, 
         </ul>
       )}
 
+      {/* Admin: save as test case (only after a DISAGREE response) */}
+      {isAdmin && hasDisagreed && (
+        <div className="guidance-respond-row">
+          {testCaseSaved ? (
+            <span className="small muted">Test case saved.</span>
+          ) : (
+            <>
+              <span className="small muted">Save as test case with expected verdict:</span>
+              {(["MET", "NOT_MET", "UNCLEAR"] as const).map((v) => (
+                <button
+                  key={v}
+                  type="button"
+                  className="btn-small"
+                  disabled={savingTestCase}
+                  onClick={() => saveTestCase(v)}
+                  aria-label={`Save as test case with expected verdict ${v}`}
+                >
+                  {savingTestCase ? "Saving…" : v}
+                </button>
+              ))}
+            </>
+          )}
+        </div>
+      )}
+
       {/* Agree / Disagree actions */}
       <div className="guidance-respond-row">
         <button
@@ -222,7 +265,7 @@ function RequirementCard({ item, clientId, runId, itemId, responses, onRespond, 
   );
 }
 
-export default function GuidanceCheckTab({ clientId, aiEnabled, toast }: Props) {
+export default function GuidanceCheckTab({ clientId, aiEnabled, isAdmin, toast }: Props) {
   const [runId, setRunId] = useState<string | null>(null);
   const [run, setRun] = useState<RunStatus | null>(null);
   const [busy, setBusy] = useState(false);
@@ -322,6 +365,7 @@ export default function GuidanceCheckTab({ clientId, aiEnabled, toast }: Props) 
                       runId={run.id}
                       itemId={run.itemIdByRequirementId[item.requirementId] ?? ""}
                       responses={run.itemResponses[item.requirementId] ?? []}
+                      isAdmin={isAdmin}
                       onRespond={handleRespond}
                       toast={toast}
                     />

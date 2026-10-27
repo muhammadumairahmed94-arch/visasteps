@@ -377,6 +377,7 @@ function CaseView({
       <GuidanceCheckTab
         clientId={view.id}
         aiEnabled={data.aiEnabled}
+        isAdmin={admin}
         toast={toast}
       />
     );

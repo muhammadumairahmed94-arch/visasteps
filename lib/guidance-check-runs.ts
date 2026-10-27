@@ -283,6 +283,28 @@ export async function processGuidanceCheckRuns(): Promise<void> {
   });
 }
 
+/**
+ * Filter allDocs to only those belonging to the given linked checklist items,
+ * and build the corresponding LinkedItemStatus[] and PayslipSummary.
+ * This is the per-requirement scoping used by processGuidanceCheckRuns.
+ */
+export function buildRequirementLinks(
+  linkedItemIds: string[],
+  linkedItemStatusByChecklistItemId: Map<string, LinkedItemStatus>,
+  docsByChecklistItemId: Map<string, DocCheckResult[]>,
+): {
+  linkedItemStatuses: LinkedItemStatus[];
+  filteredDocs: DocCheckResult[];
+  filteredPayslipSummary: ReturnType<typeof buildPayslipSummary>;
+} {
+  const linkedItemStatuses = linkedItemIds
+    .map((id) => linkedItemStatusByChecklistItemId.get(id))
+    .filter((s): s is LinkedItemStatus => s !== undefined);
+  const filteredDocs = linkedItemIds.flatMap((id) => docsByChecklistItemId.get(id) ?? []);
+  const filteredPayslipSummary = buildPayslipSummary(collectPayslipEntries(filteredDocs));
+  return { linkedItemStatuses, filteredDocs, filteredPayslipSummary };
+}
+
 export interface GuidanceCheckItemResponse {
   action: string;
   note: string | null;

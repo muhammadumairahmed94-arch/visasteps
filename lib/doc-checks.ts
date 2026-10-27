@@ -228,7 +228,7 @@ export function buildPayslipSummary(entries: PayslipEntry[]): PayslipSummary {
   };
 }
 
-function verifyFacts(rawFacts: ExtractedFact[], pageMap: Map<string, string>): ExtractedFact[] {
+export function verifyFacts(rawFacts: ExtractedFact[], pageMap: Map<string, string>): ExtractedFact[] {
   if (rawFacts.length === 0) return [];
   const claims = rawFacts.map((f) => ({
     claimText: f.value,
