@@ -136,12 +136,13 @@ const ReviewInput = z.object({
   ruleType: z.enum(["DATE_LIMIT", "MONEY_THRESHOLD", "DOCUMENT_PRESENT", "NAME_MATCH", "OTHER"]).optional(),
   limitOrThreshold: z.string().max(200).nullable().optional(),
   evidenceNeeded: z.string().trim().min(2).max(2000).optional(),
+  linkedItemIds: z.array(z.string().cuid()).max(20).optional(),
 });
 
 export async function reviewRequirement(admin: User, requirementId: string, rawInput: unknown): Promise<void> {
   const v = ReviewInput.safeParse(rawInput);
   if (!v.success) throw new UserError(v.error.issues[0].message);
-  const { action, ...edits } = v.data;
+  const { action, linkedItemIds, ...edits } = v.data;
 
   const req = await db.requirement.findFirst({
     where: { id: requirementId, firmId: admin.firmId, status: "DRAFT" },
@@ -149,6 +150,14 @@ export async function reviewRequirement(admin: User, requirementId: string, rawI
   if (!req) throw new UserError("Requirement not found or already reviewed.");
 
   const finalRuleType = edits.ruleType ?? req.ruleType;
+
+  // Validate that any provided linkedItemIds belong to this firm's route
+  if (linkedItemIds && linkedItemIds.length > 0) {
+    const validCount = await db.checklistItem.count({
+      where: { id: { in: linkedItemIds }, routeId: req.routeId },
+    });
+    if (validCount !== linkedItemIds.length) throw new UserError("One or more linked checklist items are invalid.");
+  }
 
   await db.requirement.update({
     where: { id: requirementId },
@@ -162,6 +171,15 @@ export async function reviewRequirement(admin: User, requirementId: string, rawI
       ...(edits.evidenceNeeded !== undefined && { evidenceNeeded: edits.evidenceNeeded }),
     },
   });
+
+  if (action === "approve" && linkedItemIds !== undefined) {
+    await db.$transaction([
+      db.requirementChecklistItem.deleteMany({ where: { requirementId } }),
+      ...linkedItemIds.map((checklistItemId) =>
+        db.requirementChecklistItem.create({ data: { requirementId, checklistItemId } }),
+      ),
+    ]);
+  }
 
   if (action === "approve" && finalRuleType === "DOCUMENT_PRESENT") {
     await db.checklistSuggestion.create({
@@ -209,8 +227,8 @@ export async function acceptChecklistSuggestion(admin: User, suggestionId: strin
   const routeId = suggestion.requirement.routeId;
   const maxOrder = await db.checklistItem.aggregate({ where: { routeId }, _max: { order: true } });
 
-  await db.$transaction([
-    db.checklistItem.create({
+  await db.$transaction(async (tx) => {
+    const newItem = await tx.checklistItem.create({
       data: {
         routeId,
         folder: form.folder,
@@ -222,9 +240,12 @@ export async function acceptChecklistSuggestion(admin: User, suggestionId: strin
         assignedTo: form.assignedTo,
         order: (maxOrder._max.order ?? 0) + 1,
       },
-    }),
-    db.checklistSuggestion.update({ where: { id: suggestionId }, data: { status: "ACCEPTED" } }),
-  ]);
+    });
+    await tx.checklistSuggestion.update({ where: { id: suggestionId }, data: { status: "ACCEPTED" } });
+    await tx.requirementChecklistItem.create({
+      data: { requirementId: suggestion.requirementId, checklistItemId: newItem.id },
+    });
+  });
 
   await audit({ firmId: admin.firmId, actorType: "USER", actorId: admin.id, action: "requirement.suggestion.accept", targetId: suggestionId });
 }
@@ -260,6 +281,7 @@ export async function requirementsView(staff: User) {
     include: {
       citationSource: { select: { title: true, govukUrl: true } },
       reviewedBy: { select: { name: true } },
+      linkedChecklistItems: { select: { checklistItemId: true } },
     },
   });
 
@@ -362,6 +384,7 @@ function mapRequirement(req: {
   reviewedAt: Date | null;
   reviewedBy: { name: string } | null;
   citationSource: { title: string; govukUrl: string };
+  linkedChecklistItems: { checklistItemId: string }[];
 }) {
   return {
     id: req.id,
@@ -375,6 +398,7 @@ function mapRequirement(req: {
     reviewedAt: req.reviewedAt?.toISOString() ?? null,
     reviewedBy: req.reviewedBy?.name ?? null,
     citationSource: req.citationSource,
+    linkedItemIds: req.linkedChecklistItems.map((l) => l.checklistItemId),
   };
 }
 

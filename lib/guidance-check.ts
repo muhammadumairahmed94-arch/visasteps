@@ -1,7 +1,8 @@
 import { parseSingleUkDate } from "./number-check";
+import { isDateInWindow } from "./date-window";
 import type { DocCheckResult, PayslipSummary } from "./doc-checks";
 
-export type GuidanceCheckVerdict = "MET" | "NOT_MET" | "UNCLEAR";
+export type GuidanceCheckVerdict = "MET" | "NOT_MET" | "UNCLEAR" | "NOT_APPLICABLE";
 
 export interface GuidanceCheckEvidence {
   quote: string;
@@ -33,6 +34,14 @@ export interface GuidanceCheckRunResult {
   summaryLine: string;
 }
 
+/** Status of one linked checklist item for DOCUMENT_PRESENT checks. */
+export interface LinkedItemStatus {
+  checklistItemId: string;
+  title: string;
+  hasCurrentFile: boolean;
+  isRedo: boolean;
+}
+
 interface Requirement {
   id: string;
   whatIsChecked: string;
@@ -49,7 +58,7 @@ function parseMoneyAmount(s: string): number | null {
   return isNaN(n) ? null : n;
 }
 
-function parsePerson(s: string): "client" | "sponsor" | null {
+export function parsePerson(s: string): "client" | "sponsor" | null {
   const lower = s.toLowerCase();
   if (/\b(sponsor|partner)\b/.test(lower)) return "sponsor";
   if (/\b(client|applicant)\b/.test(lower)) return "client";
@@ -68,107 +77,7 @@ function collectEvidence(docs: DocCheckResult[], factKinds: string[]): GuidanceC
   return out;
 }
 
-export function checkDateRequirement(
-  req: Requirement,
-  docs: DocCheckResult[],
-  anchor: Date,
-): GuidanceCheckItemResult {
-  const threshold = req.limitOrThreshold ?? "";
-  const isExpiry = /expir|valid|not\s+expire/i.test(threshold);
-  const isWindow = /last\s+\d+\s+(day|week|month)/i.test(threshold);
-
-  const evidence = collectEvidence(docs, isExpiry ? ["expiry-date"] : ["document-date", "expiry-date"]);
-
-  if (evidence.length === 0) {
-    return {
-      requirementId: req.id,
-      whatIsChecked: req.whatIsChecked,
-      ruleType: req.ruleType,
-      limitOrThreshold: req.limitOrThreshold,
-      evidenceNeeded: req.evidenceNeeded,
-      citationQuote: req.citationQuote,
-      verdict: "UNCLEAR",
-      detail: "No date found in uploaded documents.",
-      evidenceFound: [],
-    };
-  }
-
-  // Check first relevant date found
-  const first = evidence[0];
-  const parsed = parseSingleUkDate(first.value);
-  if (!parsed) {
-    return {
-      requirementId: req.id,
-      whatIsChecked: req.whatIsChecked,
-      ruleType: req.ruleType,
-      limitOrThreshold: req.limitOrThreshold,
-      evidenceNeeded: req.evidenceNeeded,
-      citationQuote: req.citationQuote,
-      verdict: "UNCLEAR",
-      detail: `Could not read the date value: "${first.value}".`,
-      evidenceFound: evidence,
-    };
-  }
-
-  const dateObj = new Date(Date.UTC(parsed.year, parsed.month - 1, parsed.day));
-
-  if (isExpiry) {
-    const met = dateObj >= anchor;
-    return {
-      requirementId: req.id,
-      whatIsChecked: req.whatIsChecked,
-      ruleType: req.ruleType,
-      limitOrThreshold: req.limitOrThreshold,
-      evidenceNeeded: req.evidenceNeeded,
-      citationQuote: req.citationQuote,
-      verdict: met ? "MET" : "NOT_MET",
-      detail: met
-        ? `Expires ${first.value} — on or after the submission date.`
-        : `Expires ${first.value} — before the submission date.`,
-      evidenceFound: evidence,
-    };
-  }
-
-  if (isWindow) {
-    const windowMatch = threshold.match(/last\s+(\d+)\s+(day|week|month)/i);
-    if (!windowMatch) {
-      return {
-        requirementId: req.id,
-        whatIsChecked: req.whatIsChecked,
-        ruleType: req.ruleType,
-        limitOrThreshold: req.limitOrThreshold,
-        evidenceNeeded: req.evidenceNeeded,
-        citationQuote: req.citationQuote,
-        verdict: "UNCLEAR",
-        detail: `Date window "${threshold}" not recognised.`,
-        evidenceFound: evidence,
-      };
-    }
-    const n = parseInt(windowMatch[1], 10);
-    const unit = windowMatch[2].toLowerCase();
-    let windowMs: number;
-    if (unit === "day") windowMs = n * 86_400_000;
-    else if (unit === "week") windowMs = n * 7 * 86_400_000;
-    else windowMs = n * 30 * 86_400_000;
-
-    const cutoff = new Date(anchor.getTime() - windowMs);
-    const met = dateObj >= cutoff && dateObj <= anchor;
-    return {
-      requirementId: req.id,
-      whatIsChecked: req.whatIsChecked,
-      ruleType: req.ruleType,
-      limitOrThreshold: req.limitOrThreshold,
-      evidenceNeeded: req.evidenceNeeded,
-      citationQuote: req.citationQuote,
-      verdict: met ? "MET" : "NOT_MET",
-      detail: met
-        ? `Dated ${first.value} — within the required window.`
-        : `Dated ${first.value} — outside the required window.`,
-      evidenceFound: evidence,
-    };
-  }
-
-  // General date check: just show the date as evidence
+function base(req: Requirement) {
   return {
     requirementId: req.id,
     whatIsChecked: req.whatIsChecked,
@@ -176,54 +85,161 @@ export function checkDateRequirement(
     limitOrThreshold: req.limitOrThreshold,
     evidenceNeeded: req.evidenceNeeded,
     citationQuote: req.citationQuote,
+  };
+}
+
+function notLinked(req: Requirement): GuidanceCheckItemResult {
+  return {
+    ...base(req),
     verdict: "UNCLEAR",
-    detail: `Date found: ${first.value}. Please confirm it meets the requirement.`,
+    detail: "Requirement not linked to a checklist document — ask an admin.",
+    evidenceFound: [],
+  };
+}
+
+export function checkDateRequirement(
+  req: Requirement,
+  docs: DocCheckResult[],
+  anchor: Date,
+  hasLinkedItems: boolean,
+): GuidanceCheckItemResult {
+  if (!hasLinkedItems) return notLinked(req);
+
+  const threshold = req.limitOrThreshold ?? "";
+  const isExpiry = /expir|valid|not\s+expire/i.test(threshold);
+  const windowStr = threshold.match(/last\s+\d+\s+(?:day|month)s?/i)?.[0] ?? null;
+
+  const factKinds = isExpiry ? ["expiry-date"] : ["document-date", "expiry-date"];
+  const evidence = collectEvidence(docs, factKinds);
+
+  if (evidence.length === 0) {
+    return {
+      ...base(req),
+      verdict: "UNCLEAR",
+      detail: "No date found in the linked uploaded documents.",
+      evidenceFound: [],
+    };
+  }
+
+  if (isExpiry) {
+    // Use the worst (earliest) expiry — if that one passes, they all pass
+    const parsed = evidence
+      .map((e) => ({ e, d: parseSingleUkDate(e.value) }))
+      .filter((x): x is { e: GuidanceCheckEvidence; d: NonNullable<ReturnType<typeof parseSingleUkDate>> } => x.d !== null);
+
+    if (parsed.length === 0) {
+      return { ...base(req), verdict: "UNCLEAR", detail: `Could not read expiry date value.`, evidenceFound: evidence };
+    }
+
+    const worst = parsed.reduce((a, b) => {
+      const da = new Date(Date.UTC(a.d.year, a.d.month - 1, a.d.day));
+      const db2 = new Date(Date.UTC(b.d.year, b.d.month - 1, b.d.day));
+      return da < db2 ? a : b;
+    });
+    const worstDate = new Date(Date.UTC(worst.d.year, worst.d.month - 1, worst.d.day));
+    const met = worstDate >= anchor;
+    return {
+      ...base(req),
+      verdict: met ? "MET" : "NOT_MET",
+      detail: met
+        ? `Expires ${worst.e.value} — on or after the submission date.`
+        : `Expires ${worst.e.value} — before the submission date.`,
+      evidenceFound: evidence,
+    };
+  }
+
+  if (windowStr) {
+    // Use isDateInWindow (calendar-month logic); worst = most out-of-window
+    const parsed = evidence
+      .map((e) => ({ e, d: parseSingleUkDate(e.value) }))
+      .filter((x): x is { e: GuidanceCheckEvidence; d: NonNullable<ReturnType<typeof parseSingleUkDate>> } => x.d !== null);
+
+    if (parsed.length === 0) {
+      return { ...base(req), verdict: "UNCLEAR", detail: `Could not read date value.`, evidenceFound: evidence };
+    }
+
+    const checked = parsed.map(({ e, d }) => {
+      const dateObj = new Date(Date.UTC(d.year, d.month - 1, d.day));
+      const inWindow = isDateInWindow(dateObj, windowStr, anchor);
+      return { e, inWindow };
+    });
+
+    const anyUnrecognised = checked.some((c) => c.inWindow === null);
+    if (anyUnrecognised) {
+      return {
+        ...base(req),
+        verdict: "UNCLEAR",
+        detail: `Date window "${windowStr}" not recognised.`,
+        evidenceFound: evidence,
+      };
+    }
+
+    const worstFailed = checked.find((c) => c.inWindow === false);
+    if (worstFailed) {
+      return {
+        ...base(req),
+        verdict: "NOT_MET",
+        detail: `Dated ${worstFailed.e.value} — outside the required window.`,
+        evidenceFound: evidence,
+      };
+    }
+
+    const best = checked[0];
+    return {
+      ...base(req),
+      verdict: "MET",
+      detail: `Dated ${best.e.value} — within the required window.`,
+      evidenceFound: evidence,
+    };
+  }
+
+  // General date — can't auto-decide
+  return {
+    ...base(req),
+    verdict: "UNCLEAR",
+    detail: `Date found: ${evidence[0].value}. Please confirm it meets the requirement.`,
     evidenceFound: evidence,
   };
 }
 
+const INCOME_CAVEAT = " Income threshold only — other conditions (e.g. length of employment) not checked.";
+
 export function checkMoneyRequirement(
   req: Requirement,
   payslipSummary: PayslipSummary,
+  hasLinkedItems: boolean,
 ): GuidanceCheckItemResult {
-  const base = {
-    requirementId: req.id,
-    whatIsChecked: req.whatIsChecked,
-    ruleType: req.ruleType,
-    limitOrThreshold: req.limitOrThreshold,
-    evidenceNeeded: req.evidenceNeeded,
-    citationQuote: req.citationQuote,
-    evidenceFound: [] as GuidanceCheckEvidence[],
-  };
+  const b = { ...base(req), evidenceFound: [] as GuidanceCheckEvidence[] };
+
+  if (!hasLinkedItems) return { ...b, verdict: "UNCLEAR", detail: "Requirement not linked to a checklist document — ask an admin." };
 
   const threshold = req.limitOrThreshold ?? "";
 
   const amount = parseMoneyAmount(threshold);
   if (amount === null) {
-    return { ...base, verdict: "UNCLEAR", detail: "Threshold amount not specified in the requirement." };
+    return { ...b, verdict: "UNCLEAR", detail: "Threshold amount not specified in the requirement." };
   }
 
   const person = parsePerson(threshold);
   if (person === null) {
-    return { ...base, verdict: "UNCLEAR", detail: "Requirement does not say whose income counts (client or partner)." };
+    return { ...b, verdict: "UNCLEAR", detail: "Requirement does not say whose income counts (client or partner)." };
   }
 
   const summary = person === "client" ? payslipSummary.client : payslipSummary.sponsor;
   const label = person === "client" ? "Client" : "Partner";
 
   if (!summary) {
-    return { ...base, verdict: "UNCLEAR", detail: `No ${label.toLowerCase()} payslip documents uploaded.` };
+    return { ...b, verdict: "UNCLEAR", detail: `No ${label.toLowerCase()} payslip documents found in the linked checklist items.` };
   }
 
   if (summary.annualEstimate === null) {
-    return { ...base, verdict: "UNCLEAR", detail: `${label} pay period not confirmed — cannot estimate annual income.` };
+    return { ...b, verdict: "UNCLEAR", detail: `${label} pay period not confirmed — cannot estimate annual income.` };
   }
 
   const met = summary.annualEstimate >= amount;
-  const formatted = `£${summary.annualEstimate.toLocaleString("en-GB")}`;
-  const threshold_formatted = `£${amount.toLocaleString("en-GB")}`;
+  const fmtEst = `£${summary.annualEstimate.toLocaleString("en-GB")}`;
+  const fmtThresh = `£${amount.toLocaleString("en-GB")}`;
 
-  // Collect payslip evidence entries
   const evidenceFound: GuidanceCheckEvidence[] = summary.grossEntries.map((e) => ({
     quote: e.quote,
     docTitle: e.docTitle,
@@ -232,62 +248,52 @@ export function checkMoneyRequirement(
   }));
 
   return {
-    ...base,
+    ...b,
     verdict: met ? "MET" : "NOT_MET",
-    detail: met
-      ? `${label} annual income estimate ${formatted} meets the ${threshold_formatted} threshold.`
-      : `${label} annual income estimate ${formatted} is below the ${threshold_formatted} threshold.`,
+    detail: (met
+      ? `${label} annual income estimate ${fmtEst} meets the ${fmtThresh} threshold.`
+      : `${label} annual income estimate ${fmtEst} is below the ${fmtThresh} threshold.`) + INCOME_CAVEAT,
     evidenceFound,
   };
 }
 
 export function checkDocumentPresentRequirement(
   req: Requirement,
-  docs: DocCheckResult[],
+  linkedItemStatuses: LinkedItemStatus[],
 ): GuidanceCheckItemResult {
-  const base = {
-    requirementId: req.id,
-    whatIsChecked: req.whatIsChecked,
-    ruleType: req.ruleType,
-    limitOrThreshold: req.limitOrThreshold,
-    evidenceNeeded: req.evidenceNeeded,
-    citationQuote: req.citationQuote,
-  };
+  const b = base(req);
 
-  if (docs.length === 0) {
-    return { ...base, verdict: "NOT_MET", detail: "No documents have been uploaded.", evidenceFound: [] };
+  if (linkedItemStatuses.length === 0) {
+    return { ...b, verdict: "UNCLEAR", detail: "Requirement not linked to a checklist document — ask an admin.", evidenceFound: [] };
   }
 
-  // Keywords from whatIsChecked / evidenceNeeded
-  const keywords = (req.whatIsChecked + " " + req.evidenceNeeded)
-    .toLowerCase()
-    .split(/\s+/)
-    .filter((w) => w.length > 3);
+  const missing = linkedItemStatuses.filter((s) => !s.hasCurrentFile);
+  const redo = linkedItemStatuses.filter((s) => s.hasCurrentFile && s.isRedo);
+  const ok = linkedItemStatuses.filter((s) => s.hasCurrentFile && !s.isRedo);
 
-  const matching = docs.filter((d) => {
-    const haystack = (d.title + " " + d.folder).toLowerCase();
-    return keywords.some((kw) => haystack.includes(kw));
-  });
-
-  if (matching.length > 0) {
+  if (missing.length > 0) {
     return {
-      ...base,
-      verdict: "MET",
-      detail: `Found: ${matching.map((d) => d.title).join(", ")}.`,
-      evidenceFound: matching.map((d) => ({
-        quote: d.title,
-        docTitle: d.title,
-        factKind: "document-title",
-        value: d.title,
-      })),
+      ...b,
+      verdict: "NOT_MET",
+      detail: `Not uploaded: ${missing.map((s) => s.title).join(", ")}.`,
+      evidenceFound: [],
+    };
+  }
+
+  if (redo.length > 0) {
+    return {
+      ...b,
+      verdict: "NOT_MET",
+      detail: `Please redo requested for: ${redo.map((s) => s.title).join(", ")}.`,
+      evidenceFound: ok.map((s) => ({ quote: s.title, docTitle: s.title, factKind: "document-title", value: s.title })),
     };
   }
 
   return {
-    ...base,
-    verdict: "NOT_MET",
-    detail: "No matching document found in the uploaded files.",
-    evidenceFound: [],
+    ...b,
+    verdict: "MET",
+    detail: `Uploaded: ${ok.map((s) => s.title).join(", ")}.`,
+    evidenceFound: ok.map((s) => ({ quote: s.title, docTitle: s.title, factKind: "document-title", value: s.title })),
   };
 }
 
@@ -295,25 +301,13 @@ export function checkNameMatchRequirement(
   req: Requirement,
   docs: DocCheckResult[],
 ): GuidanceCheckItemResult {
-  const base = {
-    requirementId: req.id,
-    whatIsChecked: req.whatIsChecked,
-    ruleType: req.ruleType,
-    limitOrThreshold: req.limitOrThreshold,
-    evidenceNeeded: req.evidenceNeeded,
-    citationQuote: req.citationQuote,
-  };
-
   const evidence = collectEvidence(docs, ["holder-name"]);
-
-  if (evidence.length === 0) {
-    return { ...base, verdict: "UNCLEAR", detail: "No name found in uploaded documents.", evidenceFound: [] };
-  }
-
   return {
-    ...base,
+    ...base(req),
     verdict: "UNCLEAR",
-    detail: "Name found — please review the document summary for name check results.",
+    detail: evidence.length > 0
+      ? "Name found — please review the document summary for name check results."
+      : "No name found in uploaded documents.",
     evidenceFound: evidence,
   };
 }
@@ -322,55 +316,48 @@ export function checkOtherRequirement(
   req: Requirement,
   docs: DocCheckResult[],
 ): GuidanceCheckItemResult {
-  const base = {
-    requirementId: req.id,
-    whatIsChecked: req.whatIsChecked,
-    ruleType: req.ruleType,
-    limitOrThreshold: req.limitOrThreshold,
-    evidenceNeeded: req.evidenceNeeded,
-    citationQuote: req.citationQuote,
-  };
-
-  // Collect all facts as potential evidence
   const evidence = collectEvidence(docs, [
     "expiry-date", "document-date", "amount", "holder-name",
     "date-of-birth", "passport-number", "address", "relationship",
   ]);
-
-  if (evidence.length === 0) {
-    return {
-      ...base,
-      verdict: "UNCLEAR",
-      detail: "No relevant evidence found in uploaded documents.",
-      evidenceFound: [],
-    };
-  }
-
   return {
-    ...base,
+    ...base(req),
     verdict: "UNCLEAR",
-    detail: "Evidence found — please review and confirm this requirement is met.",
+    detail: evidence.length > 0
+      ? "Evidence found — please review and confirm this requirement is met."
+      : "No relevant evidence found in uploaded documents.",
     evidenceFound: evidence,
   };
 }
 
+export interface RequirementWithLinks {
+  id: string;
+  whatIsChecked: string;
+  ruleType: string;
+  limitOrThreshold: string | null;
+  evidenceNeeded: string;
+  citationQuote: string;
+  linkedItemStatuses: LinkedItemStatus[];
+  filteredDocs: DocCheckResult[];
+  filteredPayslipSummary: PayslipSummary;
+}
+
 export function checkRequirement(
-  req: Requirement,
-  docs: DocCheckResult[],
-  payslipSummary: PayslipSummary,
+  req: RequirementWithLinks,
   anchor: Date,
 ): GuidanceCheckItemResult {
+  const hasLinked = req.linkedItemStatuses.length > 0;
   switch (req.ruleType) {
     case "DATE_LIMIT":
-      return checkDateRequirement(req, docs, anchor);
+      return checkDateRequirement(req, req.filteredDocs, anchor, hasLinked);
     case "MONEY_THRESHOLD":
-      return checkMoneyRequirement(req, payslipSummary);
+      return checkMoneyRequirement(req, req.filteredPayslipSummary, hasLinked);
     case "DOCUMENT_PRESENT":
-      return checkDocumentPresentRequirement(req, docs);
+      return checkDocumentPresentRequirement(req, req.linkedItemStatuses);
     case "NAME_MATCH":
-      return checkNameMatchRequirement(req, docs);
+      return checkNameMatchRequirement(req, req.filteredDocs);
     default:
-      return checkOtherRequirement(req, docs);
+      return checkOtherRequirement(req, req.filteredDocs);
   }
 }
 
@@ -382,18 +369,21 @@ export function buildGuidanceCheckResult(
     .filter((i) => i.verdict === "UNCLEAR" && i.evidenceFound.length === 0)
     .map((i) => ({ whatIsChecked: i.whatIsChecked, reason: i.detail }));
 
-  const problemCount = items.filter((i) => i.verdict === "NOT_MET").length;
-  const unclearCount = items.filter(
-    (i) => i.verdict === "UNCLEAR" && i.evidenceFound.length > 0,
-  ).length;
+  const notMetCount = items.filter((i) => i.verdict === "NOT_MET").length;
+  const unclearCount = items.filter((i) => i.verdict === "UNCLEAR").length;
+  const unclearNoEvidenceCount = items.filter((i) => i.verdict === "UNCLEAR" && i.evidenceFound.length === 0).length;
 
   let summaryLine: string;
-  if (problemCount === 0 && unclearCount === 0) {
+  const allResolved = items.every((i) => i.verdict === "MET" || i.verdict === "NOT_APPLICABLE");
+
+  if (allResolved) {
     summaryLine = "No problems found in the uploaded guidance.";
-  } else if (problemCount > 0) {
-    summaryLine = `${problemCount} requirement${problemCount === 1 ? "" : "s"} not met.`;
+  } else if (notMetCount > 0 && unclearCount > 0) {
+    summaryLine = `${notMetCount} not met, ${unclearCount} need review (${unclearNoEvidenceCount} with no evidence found).`;
+  } else if (notMetCount > 0) {
+    summaryLine = `${notMetCount} not met.`;
   } else {
-    summaryLine = `${unclearCount} requirement${unclearCount === 1 ? "" : "s"} need${unclearCount === 1 ? "s" : ""} review.`;
+    summaryLine = `${unclearCount} need review (${unclearNoEvidenceCount} with no evidence found).`;
   }
 
   return {

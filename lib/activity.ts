@@ -93,7 +93,9 @@ export const TEXT: Record<string, string> = {
   "case.analyse":          "AI analysis question asked",
   "case.analysis.delete":  "AI analysis question deleted",
   "case.doccheck":         "AI document fact check run",
-  "case.guidancecheck":    "Guidance check run",
+  "case.guidancecheck":         "Guidance check run",
+  "case.guidancecheck.agree":   "Agreed with guidance check result",
+  "case.guidancecheck.disagree": "Disagreed with guidance check result",
   // Requirements
   "requirement.draft":             "Requirements draft started",
   "requirement.edit":              "Draft requirement edited",

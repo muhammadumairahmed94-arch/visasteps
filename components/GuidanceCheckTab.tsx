@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import type { GuidanceCheckRunResult, GuidanceCheckItemResult } from "@/lib/guidance-check";
+import type { GuidanceCheckItemResponse } from "@/lib/guidance-check-runs";
 import { api } from "./ui";
 
 interface Props {
@@ -17,10 +18,22 @@ interface RunStatus {
   done: number;
   failed: number;
   result: GuidanceCheckRunResult | null;
+  itemResponses: Record<string, GuidanceCheckItemResponse[]>;
+  itemIdByRequirementId: Record<string, string>;
 }
 
-const VERDICT_LABEL: Record<string, string> = { MET: "✓", NOT_MET: "✗", UNCLEAR: "?" };
-const VERDICT_CLASS: Record<string, string> = { MET: "verdict-ok", NOT_MET: "verdict-fail", UNCLEAR: "verdict-unclear" };
+const VERDICT_LABEL: Record<string, string> = {
+  MET: "✓",
+  NOT_MET: "✗",
+  UNCLEAR: "?",
+  NOT_APPLICABLE: "—",
+};
+const VERDICT_CLASS: Record<string, string> = {
+  MET: "verdict-ok",
+  NOT_MET: "verdict-fail",
+  UNCLEAR: "verdict-unclear",
+  NOT_APPLICABLE: "verdict-na",
+};
 
 function VerdictBadge({ v }: { v: string }) {
   return (
@@ -66,7 +79,44 @@ function CoveragePanel({ coverage }: { coverage: GuidanceCheckRunResult["coverag
   );
 }
 
-function RequirementCard({ item }: { item: GuidanceCheckItemResult }) {
+interface RequirementCardProps {
+  item: GuidanceCheckItemResult;
+  clientId: string;
+  runId: string;
+  itemId: string;
+  responses: GuidanceCheckItemResponse[];
+  onRespond: (requirementId: string, responses: GuidanceCheckItemResponse[]) => void;
+  toast: (msg: string) => void;
+}
+
+function RequirementCard({ item, clientId, runId, itemId, responses, onRespond, toast }: RequirementCardProps) {
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState("");
+  const [showNote, setShowNote] = useState(false);
+  const [pendingAction, setPendingAction] = useState<"AGREED" | "DISAGREE" | null>(null);
+
+  async function respond(action: "AGREED" | "DISAGREE") {
+    setBusy(true);
+    const r = await api<{ ok: boolean }>(
+      `/api/staff/cases/${clientId}/guidance-check/${runId}/${itemId}/respond`,
+      { method: "POST", body: JSON.stringify({ action, note: note.trim() || undefined }) },
+    );
+    setBusy(false);
+    if (!r.ok) { toast(r.error); return; }
+    setPendingAction(null);
+    setNote("");
+    setShowNote(false);
+    // Optimistically update responses list
+    const existing = responses.filter(() => true); // fresh from server on next poll
+    const newResp: GuidanceCheckItemResponse = {
+      action,
+      note: note.trim() || null,
+      staffName: "You",
+      createdAt: new Date().toISOString(),
+    };
+    onRespond(item.requirementId, [...existing.filter((rr) => rr.staffName !== "You"), newResp]);
+  }
+
   return (
     <div className={`doc-check-card ${VERDICT_CLASS[item.verdict] ?? ""}`}>
       <div className="doc-check-header">
@@ -99,6 +149,75 @@ function RequirementCard({ item }: { item: GuidanceCheckItemResult }) {
         <summary className="muted small">Guidance quote</summary>
         <blockquote className="claim-quote small">{item.citationQuote}</blockquote>
       </details>
+
+      {/* Caseworker responses */}
+      {responses.length > 0 && (
+        <ul className="guidance-responses small">
+          {responses.map((rr, i) => (
+            <li key={i} className={`guidance-response guidance-response--${rr.action.toLowerCase()}`}>
+              <strong>{rr.staffName}</strong>{" "}
+              <span className="muted">{rr.action === "AGREED" ? "agreed" : "disagreed"}</span>
+              {rr.note && <span> — {rr.note}</span>}
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {/* Agree / Disagree actions */}
+      <div className="guidance-respond-row">
+        <button
+          type="button"
+          className="btn-small btn-ok"
+          disabled={busy}
+          onClick={() => { setPendingAction("AGREED"); setShowNote(true); }}
+          aria-label="Agree with this result"
+        >
+          Agree
+        </button>
+        <button
+          type="button"
+          className="btn-small btn-warn"
+          disabled={busy}
+          onClick={() => { setPendingAction("DISAGREE"); setShowNote(true); }}
+          aria-label="Disagree with this result"
+        >
+          Disagree
+        </button>
+      </div>
+
+      {showNote && pendingAction && (
+        <div className="guidance-respond-note">
+          <label className="small" htmlFor={`note-${item.requirementId}`}>
+            Note (optional)
+          </label>
+          <textarea
+            id={`note-${item.requirementId}`}
+            className="small"
+            rows={2}
+            maxLength={2000}
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+          />
+          <div className="guidance-respond-row">
+            <button
+              type="button"
+              className="btn-small btn-primary"
+              disabled={busy}
+              onClick={() => respond(pendingAction)}
+            >
+              {busy ? "Saving…" : `Confirm ${pendingAction === "AGREED" ? "agree" : "disagree"}`}
+            </button>
+            <button
+              type="button"
+              className="btn-small"
+              disabled={busy}
+              onClick={() => { setShowNote(false); setPendingAction(null); setNote(""); }}
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -132,6 +251,13 @@ export default function GuidanceCheckTab({ clientId, aiEnabled, toast }: Props) 
     setBusy(false);
     if (!r.ok) { toast(r.error); return; }
     setRunId(r.data.runId);
+  }
+
+  function handleRespond(requirementId: string, responses: GuidanceCheckItemResponse[]) {
+    setRun((prev) => {
+      if (!prev) return prev;
+      return { ...prev, itemResponses: { ...prev.itemResponses, [requirementId]: responses } };
+    });
   }
 
   if (!aiEnabled) {
@@ -189,7 +315,16 @@ export default function GuidanceCheckTab({ clientId, aiEnabled, toast }: Props) 
 
                 <div className="doc-check-list">
                   {run.result.items.map((item) => (
-                    <RequirementCard key={item.requirementId} item={item} />
+                    <RequirementCard
+                      key={item.requirementId}
+                      item={item}
+                      clientId={clientId}
+                      runId={run.id}
+                      itemId={run.itemIdByRequirementId[item.requirementId] ?? ""}
+                      responses={run.itemResponses[item.requirementId] ?? []}
+                      onRespond={handleRespond}
+                      toast={toast}
+                    />
                   ))}
                 </div>
               </div>

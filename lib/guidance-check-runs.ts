@@ -12,7 +12,12 @@ import {
   checkRequirement,
   buildGuidanceCheckResult,
 } from "./guidance-check";
-import type { GuidanceCheckItemResult, GuidanceCheckRunResult } from "./guidance-check";
+import type {
+  GuidanceCheckItemResult,
+  GuidanceCheckRunResult,
+  LinkedItemStatus,
+  RequirementWithLinks,
+} from "./guidance-check";
 
 const RESULT_PURPOSE = "guidance-check";
 
@@ -88,6 +93,7 @@ export async function processGuidanceCheckRuns(): Promise<void> {
           firmId: true,
           documents: {
             include: {
+              checklistItem: { select: { title: true, assignedTo: true } },
               files: { where: { storageStatus: "SAVED", supersededAt: null, oneDriveItemId: { not: null } } },
             },
           },
@@ -97,6 +103,7 @@ export async function processGuidanceCheckRuns(): Promise<void> {
               lastName: true,
               documents: {
                 include: {
+                  checklistItem: { select: { title: true, assignedTo: true } },
                   files: { where: { storageStatus: "SAVED", supersededAt: null, oneDriveItemId: { not: null } } },
                 },
               },
@@ -119,14 +126,39 @@ export async function processGuidanceCheckRuns(): Promise<void> {
   const anchor = client.plannedSubmissionDate ?? ukToday();
   const sponsor = client.sponsorAccounts[0] ?? null;
 
-  // Collect all document ids (client + sponsor)
-  const clientDocIds = client.documents.filter((d) => d.files.length > 0).map((d) => d.id);
+  // Build docId → checklistItemId map and LinkedItemStatus map from live ClientDocument records
+  type ClientDocRow = {
+    id: string;
+    checklistItemId: string;
+    status: string;
+    checklistItem: { title: string; assignedTo: string };
+    files: { id: string }[];
+  };
+  const allClientDocRows: ClientDocRow[] = [
+    ...client.documents,
+    ...(sponsor?.documents ?? []),
+  ] as ClientDocRow[];
+
+  const docIdToChecklistItemId = new Map<string, string>();
+  const linkedItemStatusByChecklistItemId = new Map<string, LinkedItemStatus>();
+
+  for (const doc of allClientDocRows) {
+    docIdToChecklistItemId.set(doc.id, doc.checklistItemId);
+    linkedItemStatusByChecklistItemId.set(doc.checklistItemId, {
+      checklistItemId: doc.checklistItemId,
+      title: doc.checklistItem.title,
+      hasCurrentFile: doc.files.length > 0,
+      isRedo: doc.status === "REDO",
+    });
+  }
+
+  // Extract facts from every uploaded document (client + sponsor)
+  const clientDocIds = client.documents.filter((d) => (d as ClientDocRow).files.length > 0).map((d) => d.id);
   const sponsorDocIds = sponsor
-    ? sponsor.documents.filter((d) => d.files.length > 0).map((d) => d.id)
+    ? sponsor.documents.filter((d) => (d as ClientDocRow).files.length > 0).map((d) => d.id)
     : [];
   const allDocIds = [...clientDocIds, ...sponsorDocIds];
 
-  // Extract facts from every uploaded document
   const allDocs: DocCheckResult[] = [];
   for (const docId of allDocIds) {
     try {
@@ -144,10 +176,18 @@ export async function processGuidanceCheckRuns(): Promise<void> {
     }
   }
 
-  const payslipEntries = collectPayslipEntries(allDocs);
-  const payslipSummary = buildPayslipSummary(payslipEntries);
+  // Group DocCheckResults by checklistItemId
+  const docsByChecklistItemId = new Map<string, DocCheckResult[]>();
+  for (const doc of allDocs) {
+    const ciId = docIdToChecklistItemId.get(doc.docId);
+    if (ciId) {
+      const bucket = docsByChecklistItemId.get(ciId) ?? [];
+      bucket.push(doc);
+      docsByChecklistItemId.set(ciId, bucket);
+    }
+  }
 
-  // Load requirement details for pending items
+  // Load requirement details including linked checklist items
   const requirementIds = run.items.map((i) => i.requirementId);
   const requirements = await db.requirement.findMany({
     where: { id: { in: requirementIds } },
@@ -158,8 +198,20 @@ export async function processGuidanceCheckRuns(): Promise<void> {
       limitOrThreshold: true,
       evidenceNeeded: true,
       citationQuote: true,
+      linkedChecklistItems: {
+        select: { checklistItemId: true },
+      },
     },
   });
+
+  // Fetch active guidance sources for the route (for sourceVersionSnapshot)
+  const routeSources = await db.guidanceSourceOnRoute.findMany({
+    where: { routeId: client.routeId },
+    include: { source: { select: { id: true, title: true, govukUrl: true } } },
+  });
+  const sourceVersionSnapshot = JSON.stringify(
+    routeSources.map((rs) => ({ id: rs.source.id, title: rs.source.title, govukUrl: rs.source.govukUrl })),
+  );
 
   const reqMap = new Map(requirements.map((r) => [r.id, r]));
 
@@ -174,9 +226,40 @@ export async function processGuidanceCheckRuns(): Promise<void> {
       continue;
     }
     try {
-      const result = checkRequirement(req, allDocs, payslipSummary, anchor);
+      // Build per-requirement filtered docs and linked item statuses
+      const linkedItemIds = req.linkedChecklistItems.map((l) => l.checklistItemId);
+      const linkedItemStatuses = linkedItemIds
+        .map((id) => linkedItemStatusByChecklistItemId.get(id))
+        .filter((s): s is LinkedItemStatus => s !== undefined);
+      const filteredDocs = linkedItemIds.flatMap((id) => docsByChecklistItemId.get(id) ?? []);
+      const filteredPayslipSummary = buildPayslipSummary(collectPayslipEntries(filteredDocs));
+
+      const requirementWithLinks: RequirementWithLinks = {
+        id: req.id,
+        whatIsChecked: req.whatIsChecked,
+        ruleType: req.ruleType,
+        limitOrThreshold: req.limitOrThreshold,
+        evidenceNeeded: req.evidenceNeeded,
+        citationQuote: req.citationQuote,
+        linkedItemStatuses,
+        filteredDocs,
+        filteredPayslipSummary,
+      };
+
+      const requirementSnapshot = JSON.stringify({
+        whatIsChecked: req.whatIsChecked,
+        ruleType: req.ruleType,
+        limitOrThreshold: req.limitOrThreshold,
+        evidenceNeeded: req.evidenceNeeded,
+        citationQuote: req.citationQuote,
+      });
+
+      const result = checkRequirement(requirementWithLinks, anchor);
       const encryptedResult = encrypt(JSON.stringify(result), RESULT_PURPOSE);
-      await db.guidanceCheckItem.update({ where: { id: item.id }, data: { status: "DONE", encryptedResult } });
+      await db.guidanceCheckItem.update({
+        where: { id: item.id },
+        data: { status: "DONE", encryptedResult, requirementSnapshot },
+      });
     } catch (e) {
       await db.guidanceCheckItem.update({
         where: { id: item.id },
@@ -195,8 +278,16 @@ export async function processGuidanceCheckRuns(): Promise<void> {
     data: {
       status: remaining === 0 ? (doneCount === 0 ? "FAILED" : "COMPLETE") : "RUNNING",
       completedAt: remaining === 0 ? new Date() : null,
+      ...(remaining === 0 ? { sourceVersionSnapshot } : {}),
     },
   });
+}
+
+export interface GuidanceCheckItemResponse {
+  action: string;
+  note: string | null;
+  staffName: string;
+  createdAt: string;
 }
 
 /** Get the current status of a run and its aggregated results (if complete). */
@@ -211,10 +302,18 @@ export async function getGuidanceCheckRun(
   done: number;
   failed: number;
   result: GuidanceCheckRunResult | null;
+  itemResponses: Record<string, GuidanceCheckItemResponse[]>;
+  itemIdByRequirementId: Record<string, string>;
 } | null> {
   const run = await db.guidanceCheckRun.findFirst({
     where: { id: runId, clientId, firmId: staff.firmId },
-    include: { items: true },
+    include: {
+      items: {
+        include: {
+          responses: { include: { staff: { select: { name: true } } } },
+        },
+      },
+    },
   });
   if (!run) return null;
 
@@ -222,13 +321,31 @@ export async function getGuidanceCheckRun(
   const done = run.items.filter((i) => i.status === "DONE").length;
   const failed = run.items.filter((i) => i.status === "FAILED").length;
 
+  // Build per-item response map keyed by requirementId
+  const itemResponses: Record<string, GuidanceCheckItemResponse[]> = {};
+  for (const item of run.items) {
+    if (item.responses.length > 0) {
+      itemResponses[item.requirementId] = item.responses.map((r) => ({
+        action: r.action,
+        note: r.note,
+        staffName: r.staff.name,
+        createdAt: r.createdAt.toISOString(),
+      }));
+    }
+  }
+
+  // Also build a map from requirementId → itemId for the respond endpoint
+  const itemIdByRequirementId: Record<string, string> = {};
+  for (const item of run.items) {
+    itemIdByRequirementId[item.requirementId] = item.id;
+  }
+
   let result: GuidanceCheckRunResult | null = null;
   if (run.status === "COMPLETE") {
     const itemResults: GuidanceCheckItemResult[] = run.items
       .filter((i) => i.status === "DONE" && i.encryptedResult)
       .map((i) => JSON.parse(decrypt(i.encryptedResult!, RESULT_PURPOSE)) as GuidanceCheckItemResult);
 
-    // Fetch mentioned-but-not-uploaded sources for this client's route
     const client = await db.client.findUnique({
       where: { id: clientId },
       select: { routeId: true },
@@ -245,5 +362,5 @@ export async function getGuidanceCheckRun(
     result = buildGuidanceCheckResult(itemResults, mentionedSources);
   }
 
-  return { id: run.id, status: run.status, total, done, failed, result };
+  return { id: run.id, status: run.status, total, done, failed, result, itemResponses, itemIdByRequirementId };
 }

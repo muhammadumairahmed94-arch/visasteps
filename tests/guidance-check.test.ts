@@ -7,7 +7,7 @@ import {
   checkOtherRequirement,
   buildGuidanceCheckResult,
 } from "@/lib/guidance-check";
-import type { GuidanceCheckItemResult } from "@/lib/guidance-check";
+import type { GuidanceCheckItemResult, LinkedItemStatus } from "@/lib/guidance-check";
 import type { DocCheckResult, PayslipSummary } from "@/lib/doc-checks";
 
 const ANCHOR = new Date(Date.UTC(2027, 0, 1)); // 1 Jan 2027
@@ -28,23 +28,36 @@ function makeReq(overrides: {
   };
 }
 
-function makeDoc(title: string, facts: { factKind: string; value: string; quote: string }[]): DocCheckResult {
+function makeDoc(
+  title: string,
+  facts: { factKind: string; value: string; quote: string }[],
+  uploaderKind: "CLIENT" | "SPONSOR" = "CLIENT",
+): DocCheckResult {
   return {
     docId: "doc-1",
     title,
     folder: "Passport",
-    uploaderKind: "CLIENT",
+    uploaderKind,
     verdict: "OK",
     checks: [],
     summaryFacts: facts.map((f) => ({
       factKind: f.factKind as never,
       value: f.value,
       docTitle: title,
-      uploaderKind: "CLIENT",
+      uploaderKind,
       fileId: "file-1",
       pageNumber: 1,
       quote: f.quote,
     })),
+  };
+}
+
+function makeLinkedItem(overrides: Partial<LinkedItemStatus> = {}): LinkedItemStatus {
+  return {
+    checklistItemId: "ci-1",
+    title: overrides.title ?? "Passport",
+    hasCurrentFile: overrides.hasCurrentFile ?? true,
+    isRedo: overrides.isRedo ?? false,
   };
 }
 
@@ -55,39 +68,55 @@ const emptyPayslip: PayslipSummary = { client: null, sponsor: null };
 describe("checkDateRequirement — expiry", () => {
   it("MET when expiry is after anchor", () => {
     const doc = makeDoc("Passport", [{ factKind: "expiry-date", value: "15 December 2030", quote: "Expires 15 December 2030" }]);
-    const r = checkDateRequirement(makeReq({ limitOrThreshold: "must not be expired" }), [doc], ANCHOR);
+    const r = checkDateRequirement(makeReq({ limitOrThreshold: "must not be expired" }), [doc], ANCHOR, true);
     expect(r.verdict).toBe("MET");
   });
 
   it("NOT_MET when expired before anchor", () => {
     const doc = makeDoc("Passport", [{ factKind: "expiry-date", value: "15 June 2026", quote: "Expires 15 June 2026" }]);
-    const r = checkDateRequirement(makeReq({ limitOrThreshold: "must not be expired" }), [doc], ANCHOR);
+    const r = checkDateRequirement(makeReq({ limitOrThreshold: "must not be expired" }), [doc], ANCHOR, true);
     expect(r.verdict).toBe("NOT_MET");
   });
 
   it("UNCLEAR when no date found", () => {
-    const r = checkDateRequirement(makeReq(), [], ANCHOR);
+    const r = checkDateRequirement(makeReq(), [], ANCHOR, true);
     expect(r.verdict).toBe("UNCLEAR");
     expect(r.detail).toContain("No date found");
   });
 
   it("UNCLEAR when date unreadable", () => {
     const doc = makeDoc("Passport", [{ factKind: "expiry-date", value: "not a date", quote: "Expires not a date" }]);
-    const r = checkDateRequirement(makeReq(), [doc], ANCHOR);
+    const r = checkDateRequirement(makeReq(), [doc], ANCHOR, true);
     expect(r.verdict).toBe("UNCLEAR");
+  });
+
+  it("UNCLEAR and mentions admin when no linked items", () => {
+    const doc = makeDoc("Passport", [{ factKind: "expiry-date", value: "15 December 2030", quote: "Expires 15 December 2030" }]);
+    const r = checkDateRequirement(makeReq(), [doc], ANCHOR, false);
+    expect(r.verdict).toBe("UNCLEAR");
+    expect(r.detail).toContain("ask an admin");
+  });
+
+  it("uses worst (earliest) expiry when multiple dates found", () => {
+    const doc1 = makeDoc("Passport", [{ factKind: "expiry-date", value: "15 December 2030", quote: "Expires 15 December 2030" }]);
+    const doc2 = makeDoc("Passport 2", [{ factKind: "expiry-date", value: "1 March 2025", quote: "Expires 1 March 2025" }]);
+    const r = checkDateRequirement(makeReq({ limitOrThreshold: "must not be expired" }), [doc1, doc2], ANCHOR, true);
+    expect(r.verdict).toBe("NOT_MET");
+    expect(r.detail).toContain("1 March 2025");
+    expect(r.evidenceFound.length).toBe(2);
   });
 });
 
 describe("checkDateRequirement — date window", () => {
   it("MET when doc date within last 3 months", () => {
     const doc = makeDoc("Bank statement", [{ factKind: "document-date", value: "15 November 2026", quote: "Dated 15 November 2026" }]);
-    const r = checkDateRequirement(makeReq({ limitOrThreshold: "issued within last 3 months" }), [doc], ANCHOR);
+    const r = checkDateRequirement(makeReq({ limitOrThreshold: "issued within last 3 months" }), [doc], ANCHOR, true);
     expect(r.verdict).toBe("MET");
   });
 
   it("NOT_MET when doc date outside window", () => {
     const doc = makeDoc("Bank statement", [{ factKind: "document-date", value: "1 June 2026", quote: "Dated 1 June 2026" }]);
-    const r = checkDateRequirement(makeReq({ limitOrThreshold: "issued within last 3 months" }), [doc], ANCHOR);
+    const r = checkDateRequirement(makeReq({ limitOrThreshold: "issued within last 3 months" }), [doc], ANCHOR, true);
     expect(r.verdict).toBe("NOT_MET");
   });
 });
@@ -97,7 +126,16 @@ describe("checkDateRequirement — date window", () => {
 function makePayslip(annualEstimate: number | null, person: "client" | "sponsor"): PayslipSummary {
   const summary = annualEstimate !== null
     ? {
-        grossEntries: [{ amount: annualEstimate / 12, formattedAmount: `£${annualEstimate / 12}`, payPeriod: "monthly" as const, payType: "gross" as const, payDate: "2026-12-28", person: person.toUpperCase() as "CLIENT" | "SPONSOR", docTitle: "Payslip Dec", quote: `gross pay £${annualEstimate / 12} per month` }],
+        grossEntries: [{
+          amount: annualEstimate / 12,
+          formattedAmount: `£${annualEstimate / 12}`,
+          payPeriod: "monthly" as const,
+          payType: "gross" as const,
+          payDate: "2026-12-28",
+          person: person.toUpperCase() as "CLIENT" | "SPONSOR",
+          docTitle: "Payslip Dec",
+          quote: `gross pay £${annualEstimate / 12} per month`,
+        }],
         otherEntries: [],
         payslipCount: 1,
         dateRange: { earliest: "2026-12-28", latest: "2026-12-28" },
@@ -123,9 +161,21 @@ describe("checkMoneyRequirement", () => {
     const r = checkMoneyRequirement(
       makeReq({ ruleType: "MONEY_THRESHOLD", limitOrThreshold: "£29,000 per year (sponsor income)" }),
       payslip,
+      true,
     );
     expect(r.verdict).toBe("MET");
     expect(r.detail).toContain("£30,000");
+  });
+
+  it("detail always includes the income caveat", () => {
+    const payslip = makePayslip(30_000, "sponsor");
+    const r = checkMoneyRequirement(
+      makeReq({ ruleType: "MONEY_THRESHOLD", limitOrThreshold: "£29,000 per year (sponsor income)" }),
+      payslip,
+      true,
+    );
+    expect(r.detail).toContain("Income threshold only");
+    expect(r.detail).toContain("length of employment");
   });
 
   it("NOT_MET when income below threshold", () => {
@@ -133,6 +183,7 @@ describe("checkMoneyRequirement", () => {
     const r = checkMoneyRequirement(
       makeReq({ ruleType: "MONEY_THRESHOLD", limitOrThreshold: "£29,000 per year (sponsor income)" }),
       payslip,
+      true,
     );
     expect(r.verdict).toBe("NOT_MET");
   });
@@ -141,6 +192,7 @@ describe("checkMoneyRequirement", () => {
     const r = checkMoneyRequirement(
       makeReq({ ruleType: "MONEY_THRESHOLD", limitOrThreshold: "sufficient income" }),
       emptyPayslip,
+      true,
     );
     expect(r.verdict).toBe("UNCLEAR");
     expect(r.detail).toContain("Threshold amount not specified");
@@ -150,6 +202,7 @@ describe("checkMoneyRequirement", () => {
     const r = checkMoneyRequirement(
       makeReq({ ruleType: "MONEY_THRESHOLD", limitOrThreshold: "£29,000 per year" }),
       emptyPayslip,
+      true,
     );
     expect(r.verdict).toBe("UNCLEAR");
     expect(r.detail).toContain("whose income");
@@ -159,6 +212,7 @@ describe("checkMoneyRequirement", () => {
     const r = checkMoneyRequirement(
       makeReq({ ruleType: "MONEY_THRESHOLD", limitOrThreshold: "£18,600 (client income)" }),
       emptyPayslip,
+      true,
     );
     expect(r.verdict).toBe("UNCLEAR");
     expect(r.detail).toContain("payslip");
@@ -169,6 +223,7 @@ describe("checkMoneyRequirement", () => {
     const r = checkMoneyRequirement(
       makeReq({ ruleType: "MONEY_THRESHOLD", limitOrThreshold: "£18,600 (client income)" }),
       payslip,
+      true,
     );
     expect(r.verdict).toBe("UNCLEAR");
     expect(r.detail).toContain("pay period not confirmed");
@@ -179,37 +234,136 @@ describe("checkMoneyRequirement", () => {
     const r = checkMoneyRequirement(
       makeReq({ ruleType: "MONEY_THRESHOLD", limitOrThreshold: "£18,600 per year (client income)" }),
       payslip,
+      true,
     );
     expect(r.verdict).toBe("MET");
+  });
+
+  it("UNCLEAR and mentions admin when no linked items", () => {
+    const payslip = makePayslip(30_000, "sponsor");
+    const r = checkMoneyRequirement(
+      makeReq({ ruleType: "MONEY_THRESHOLD", limitOrThreshold: "£29,000 per year (sponsor income)" }),
+      payslip,
+      false,
+    );
+    expect(r.verdict).toBe("UNCLEAR");
+    expect(r.detail).toContain("ask an admin");
+  });
+
+  it("sponsor payslips do NOT satisfy a marriage-certificate requirement (wrong linked items)", () => {
+    // Marriage cert requirement is linked to a "Marriage certificate" checklist item
+    // The payslip summary passed here is from filtered docs (sponsor payslips only)
+    // But ruleType is DOCUMENT_PRESENT — tested separately in checkDocumentPresentRequirement
+    // This test confirms that a MONEY check with sponsor data does not produce MET for a marriage cert
+    const payslip = makePayslip(35_000, "sponsor");
+    // Marriage cert requirement has no threshold → UNCLEAR
+    const r = checkMoneyRequirement(
+      makeReq({ ruleType: "MONEY_THRESHOLD", limitOrThreshold: null, whatIsChecked: "Marriage certificate" }),
+      payslip,
+      true,
+    );
+    expect(r.verdict).toBe("UNCLEAR");
+    expect(r.detail).not.toContain("meets");
   });
 });
 
 /* ── DOCUMENT_PRESENT ──────────────────────────────────────────────────── */
 
 describe("checkDocumentPresentRequirement", () => {
-  it("MET when a matching document is uploaded", () => {
-    const doc = makeDoc("UK passport", []);
+  it("MET when all linked items have a current file and are not REDO", () => {
     const r = checkDocumentPresentRequirement(
-      makeReq({ ruleType: "DOCUMENT_PRESENT", whatIsChecked: "Valid UK passport", evidenceNeeded: "Current passport" }),
-      [doc],
+      makeReq({ ruleType: "DOCUMENT_PRESENT", whatIsChecked: "Marriage certificate" }),
+      [makeLinkedItem({ title: "Marriage certificate", hasCurrentFile: true, isRedo: false })],
     );
     expect(r.verdict).toBe("MET");
+    expect(r.detail).toContain("Marriage certificate");
   });
 
-  it("NOT_MET when no matching document uploaded", () => {
-    const doc = makeDoc("Bank statement", []);
+  it("NOT_MET when linked item has no file", () => {
     const r = checkDocumentPresentRequirement(
-      makeReq({ ruleType: "DOCUMENT_PRESENT", whatIsChecked: "Employer reference letter", evidenceNeeded: "Reference from employer" }),
-      [doc],
+      makeReq({ ruleType: "DOCUMENT_PRESENT", whatIsChecked: "Marriage certificate" }),
+      [makeLinkedItem({ title: "Marriage certificate", hasCurrentFile: false })],
     );
     expect(r.verdict).toBe("NOT_MET");
+    expect(r.detail).toContain("Not uploaded");
   });
 
-  it("NOT_MET when no documents at all", () => {
+  it("NOT_MET when linked item is REDO", () => {
     const r = checkDocumentPresentRequirement(
-      makeReq({ ruleType: "DOCUMENT_PRESENT" }),
+      makeReq({ ruleType: "DOCUMENT_PRESENT", whatIsChecked: "Marriage certificate" }),
+      [makeLinkedItem({ title: "Marriage certificate", hasCurrentFile: true, isRedo: true })],
+    );
+    expect(r.verdict).toBe("NOT_MET");
+    expect(r.detail).toContain("redo");
+  });
+
+  it("UNCLEAR when no linked items (requirement not linked to checklist)", () => {
+    const r = checkDocumentPresentRequirement(
+      makeReq({ ruleType: "DOCUMENT_PRESENT", whatIsChecked: "Marriage certificate" }),
       [],
     );
+    expect(r.verdict).toBe("UNCLEAR");
+    expect(r.detail).toContain("ask an admin");
+  });
+
+  it("sponsor payslips do NOT satisfy a marriage-certificate requirement (linked item mismatch)", () => {
+    // The requirement is linked to "Marriage certificate" but we have sponsor payslip linked items
+    // In practice: marriage cert requirement would be linked to a marriage-cert checklist item
+    // If that item has no file (client hasn't uploaded it) → NOT_MET
+    const r = checkDocumentPresentRequirement(
+      makeReq({ ruleType: "DOCUMENT_PRESENT", whatIsChecked: "Marriage certificate" }),
+      [makeLinkedItem({ title: "Marriage certificate", hasCurrentFile: false, isRedo: false })],
+    );
+    expect(r.verdict).toBe("NOT_MET");
+    // Sponsor payslips being uploaded is irrelevant — not in linked items for this requirement
+  });
+
+  it("partial: NOT_MET when one of two linked items is missing", () => {
+    const r = checkDocumentPresentRequirement(
+      makeReq({ ruleType: "DOCUMENT_PRESENT" }),
+      [
+        makeLinkedItem({ checklistItemId: "ci-1", title: "Document A", hasCurrentFile: true, isRedo: false }),
+        makeLinkedItem({ checklistItemId: "ci-2", title: "Document B", hasCurrentFile: false, isRedo: false }),
+      ],
+    );
+    expect(r.verdict).toBe("NOT_MET");
+    expect(r.detail).toContain("Document B");
+  });
+});
+
+/* ── person scoping ─────────────────────────────────────────────────────── */
+
+describe("person scoping for date checks", () => {
+  it("applicant passport rule only uses docs passed to it (partner passport filtered out)", () => {
+    // Simulates the runner passing only filtered docs (linked to applicant's passport checklist item)
+    // Partner's passport would have a different checklistItemId → not in filteredDocs
+    const applicantPassport = makeDoc("Applicant passport", [
+      { factKind: "expiry-date", value: "15 December 2030", quote: "Expires 15 December 2030" },
+    ], "CLIENT");
+    // Partner passport is NOT passed — it was filtered out by the runner
+    const r = checkDateRequirement(
+      makeReq({ limitOrThreshold: "must not be expired" }),
+      [applicantPassport],
+      ANCHOR,
+      true,
+    );
+    expect(r.verdict).toBe("MET");
+    expect(r.evidenceFound.length).toBe(1);
+    expect(r.evidenceFound[0].docTitle).toBe("Applicant passport");
+  });
+
+  it("if only partner passport is in filteredDocs, a client requirement would still find that expiry", () => {
+    // This is OK — the filtering is the runner's job; checkDateRequirement trusts what it's given
+    const partnerPassport = makeDoc("Partner passport", [
+      { factKind: "expiry-date", value: "1 January 2026", quote: "Expires 1 January 2026" },
+    ], "SPONSOR");
+    const r = checkDateRequirement(
+      makeReq({ limitOrThreshold: "must not be expired" }),
+      [partnerPassport],
+      ANCHOR,
+      true,
+    );
+    // The expiry is before the anchor → NOT_MET
     expect(r.verdict).toBe("NOT_MET");
   });
 });
@@ -260,12 +414,57 @@ describe("buildGuidanceCheckResult", () => {
     expect(r.summaryLine).toBe("No problems found in the uploaded guidance.");
   });
 
+  it("summaryLine says no problems when all MET or NOT_APPLICABLE", () => {
+    const items: GuidanceCheckItemResult[] = [
+      { requirementId: "r1", whatIsChecked: "Passport", ruleType: "DATE_LIMIT", limitOrThreshold: null, evidenceNeeded: "Passport", citationQuote: "q", verdict: "MET", detail: "ok", evidenceFound: [] },
+      { requirementId: "r2", whatIsChecked: "Other", ruleType: "OTHER", limitOrThreshold: null, evidenceNeeded: "Other", citationQuote: "q", verdict: "NOT_APPLICABLE", detail: "n/a", evidenceFound: [] },
+    ];
+    const r = buildGuidanceCheckResult(items, []);
+    expect(r.summaryLine).toBe("No problems found in the uploaded guidance.");
+  });
+
+  it("all-UNCLEAR-no-evidence NEVER says 'No problems found'", () => {
+    const items: GuidanceCheckItemResult[] = [
+      { requirementId: "r1", whatIsChecked: "Passport", ruleType: "DATE_LIMIT", limitOrThreshold: null, evidenceNeeded: "Passport", citationQuote: "q", verdict: "UNCLEAR", detail: "No date found", evidenceFound: [] },
+      { requirementId: "r2", whatIsChecked: "Income", ruleType: "MONEY_THRESHOLD", limitOrThreshold: null, evidenceNeeded: "Payslips", citationQuote: "q", verdict: "UNCLEAR", detail: "No payslip", evidenceFound: [] },
+    ];
+    const r = buildGuidanceCheckResult(items, []);
+    expect(r.summaryLine).not.toContain("No problems found");
+    expect(r.summaryLine).toContain("2");
+    expect(r.summaryLine).toContain("no evidence");
+  });
+
+  it("UNCLEAR with evidence still counted in 'need review', not in 'no evidence'", () => {
+    const items: GuidanceCheckItemResult[] = [
+      { requirementId: "r1", whatIsChecked: "Income", ruleType: "MONEY_THRESHOLD", limitOrThreshold: null, evidenceNeeded: "Payslips", citationQuote: "q", verdict: "UNCLEAR", detail: "Please confirm", evidenceFound: [{ quote: "q", docTitle: "d", factKind: "amount", value: "£2000" }] },
+    ];
+    const r = buildGuidanceCheckResult(items, []);
+    expect(r.summaryLine).not.toContain("No problems found");
+    expect(r.summaryLine).toContain("1 need review");
+    expect(r.summaryLine).toContain("0 with no evidence");
+  });
+
   it("summaryLine reports NOT_MET count", () => {
     const items: GuidanceCheckItemResult[] = [
       { requirementId: "r1", whatIsChecked: "Income", ruleType: "MONEY_THRESHOLD", limitOrThreshold: "£29,000", evidenceNeeded: "Payslips", citationQuote: "q", verdict: "NOT_MET", detail: "below", evidenceFound: [] },
     ];
     const r = buildGuidanceCheckResult(items, []);
-    expect(r.summaryLine).toContain("1 requirement not met");
+    expect(r.summaryLine).toContain("1 not met");
+  });
+
+  it("summaryLine shows combined not-met and unclear", () => {
+    const items: GuidanceCheckItemResult[] = [
+      { requirementId: "r1", whatIsChecked: "Income", ruleType: "MONEY_THRESHOLD", limitOrThreshold: "£29,000", evidenceNeeded: "Payslips", citationQuote: "q", verdict: "NOT_MET", detail: "below", evidenceFound: [] },
+      { requirementId: "r2", whatIsChecked: "Income", ruleType: "MONEY_THRESHOLD", limitOrThreshold: "£29,000", evidenceNeeded: "Payslips", citationQuote: "q", verdict: "NOT_MET", detail: "below", evidenceFound: [] },
+      { requirementId: "r3", whatIsChecked: "Passport", ruleType: "DATE_LIMIT", limitOrThreshold: null, evidenceNeeded: "Passport", citationQuote: "q", verdict: "UNCLEAR", detail: "No date", evidenceFound: [] },
+      { requirementId: "r4", whatIsChecked: "Letter", ruleType: "OTHER", limitOrThreshold: null, evidenceNeeded: "Letter", citationQuote: "q", verdict: "UNCLEAR", detail: "Please confirm", evidenceFound: [{ quote: "q", docTitle: "d", factKind: "relationship", value: "employer" }] },
+      { requirementId: "r5", whatIsChecked: "Photo ID", ruleType: "DATE_LIMIT", limitOrThreshold: null, evidenceNeeded: "Photo ID", citationQuote: "q", verdict: "UNCLEAR", detail: "No date", evidenceFound: [] },
+    ];
+    const r = buildGuidanceCheckResult(items, []);
+    expect(r.summaryLine).toContain("2 not met");
+    expect(r.summaryLine).toContain("3 need review");
+    // 2 UNCLEAR with no evidence (r3, r5); r4 has evidence
+    expect(r.summaryLine).toContain("2 with no evidence");
   });
 
   it("notChecked includes items with UNCLEAR verdict and no evidence", () => {

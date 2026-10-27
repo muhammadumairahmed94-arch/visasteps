@@ -154,6 +154,7 @@ model User {
   initiatedDraftRuns   DraftRun[]       @relation("draft_run_initiated_by")
   initiatedDocCheckRuns DocCheckRun[]   @relation("doc_check_run_initiated_by")
   initiatedGuidanceCheckRuns GuidanceCheckRun[] @relation("guidance_check_run_initiated_by")
+  guidanceCheckResponses     GuidanceCheckResponse[]
   reviewedRequirements Requirement[]    @relation("requirement_reviewed_by")
   aiQuestionsAsked     AiQuestion[]     @relation("ai_question_asked_by")
 }
@@ -236,9 +237,10 @@ model ChecklistItem {
   typeKey      String // used in file names, e.g. "Passport"
   required     Boolean          @default(true)
   order        Int
-  archivedAt   DateTime? // removed from the route; kept for clients who already sent it
-  assignedTo   String    @default("CLIENT") // "CLIENT" | "SPONSOR" — who uploads this by default
-  documents    ClientDocument[]
+  archivedAt       DateTime? // removed from the route; kept for clients who already sent it
+  assignedTo       String    @default("CLIENT") // "CLIENT" | "SPONSOR" — who uploads this by default
+  documents        ClientDocument[]
+  requirementLinks RequirementChecklistItem[]
 }
 
 model ClientDocument {
@@ -581,8 +583,9 @@ model Requirement {
   reviewedBy       User?               @relation("requirement_reviewed_by", fields: [reviewedById], references: [id])
   reviewedAt       DateTime?
   archivedAt       DateTime?
-  suggestions      ChecklistSuggestion[]
-  guidanceCheckItems GuidanceCheckItem[]
+  suggestions           ChecklistSuggestion[]
+  guidanceCheckItems    GuidanceCheckItem[]
+  linkedChecklistItems  RequirementChecklistItem[]
 
   @@index([routeId, status])
   @@index([citationSourceId])
@@ -686,14 +689,15 @@ model DocCheckItem {
 
 /** A background run of guidance checking for one client. */
 model GuidanceCheckRun {
-  id            String               @id @default(cuid())
-  clientId      String
-  firmId        String
-  initiatedById String
-  status        GuidanceCheckRunStatus @default(QUEUED)
-  createdAt     DateTime             @default(now())
-  startedAt     DateTime?
-  completedAt   DateTime?
+  id                    String                 @id @default(cuid())
+  clientId              String
+  firmId                String
+  initiatedById         String
+  status                GuidanceCheckRunStatus @default(QUEUED)
+  createdAt             DateTime               @default(now())
+  startedAt             DateTime?
+  completedAt           DateTime?
+  sourceVersionSnapshot String?                // JSON: [{id,title,govukUrl}] of sources in use at run time
 
   client        Client               @relation(fields: [clientId], references: [id], onDelete: Cascade)
   firm          Firm                 @relation(fields: [firmId], references: [id])
@@ -704,19 +708,46 @@ model GuidanceCheckRun {
   @@index([status])
 }
 
-/** Result for one approved requirement within an GuidanceCheckRun. */
+/** Result for one approved requirement within a GuidanceCheckRun. */
 model GuidanceCheckItem {
-  id              String                @id @default(cuid())
-  runId           String
-  requirementId   String
-  status          GuidanceCheckItemStatus @default(PENDING)
-  errorMessage    String?
-  encryptedResult String?               // JSON: GuidanceCheckItemResult, encrypted
+  id                  String                  @id @default(cuid())
+  runId               String
+  requirementId       String
+  status              GuidanceCheckItemStatus @default(PENDING)
+  errorMessage        String?
+  encryptedResult     String?                 // JSON: GuidanceCheckItemResult, encrypted
+  requirementSnapshot String?                 // JSON snapshot of requirement fields at run time
 
-  run             GuidanceCheckRun        @relation(fields: [runId], references: [id], onDelete: Cascade)
-  requirement     Requirement           @relation(fields: [requirementId], references: [id], onDelete: Cascade)
+  run             GuidanceCheckRun   @relation(fields: [runId], references: [id], onDelete: Cascade)
+  requirement     Requirement        @relation(fields: [requirementId], references: [id], onDelete: Restrict)
+  responses       GuidanceCheckResponse[]
 
   @@unique([runId, requirementId])
+}
+
+/** Links a requirement to the checklist item(s) it applies to (set by admin on approve). */
+model RequirementChecklistItem {
+  requirementId   String
+  checklistItemId String
+  requirement     Requirement   @relation(fields: [requirementId], references: [id], onDelete: Cascade)
+  checklistItem   ChecklistItem @relation(fields: [checklistItemId], references: [id], onDelete: Cascade)
+
+  @@id([requirementId, checklistItemId])
+}
+
+/** Caseworker agree/disagree response on one guidance-check item. */
+model GuidanceCheckResponse {
+  id        String   @id @default(cuid())
+  itemId    String
+  staffId   String
+  action    String   // "AGREED" | "DISAGREE"
+  note      String?
+  createdAt DateTime @default(now())
+
+  item  GuidanceCheckItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  staff User              @relation(fields: [staffId], references: [id], onDelete: Restrict)
+
+  @@unique([itemId, staffId])
 }
 
 /** Many-to-many: one guidance source can cover multiple visa routes. */
