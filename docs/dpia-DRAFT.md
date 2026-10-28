@@ -21,14 +21,14 @@ Large volumes of identity documents (passports), financial records and some **sp
   recorded in an audit log.
 - **Systems:** DigitalOcean server in London (portal, database, virus scanner); Microsoft OneDrive (documents and
   encrypted nightly database backups); Hostinger email (notifications); AI language model provider (see below).
-- **Volume:** [expected clients per year ___ ; documents per client ~10–20].
+- **Volume:** about 100 clients per year; documents per client ~10–20.
 - **Retention:** [to be set — see section 6, risk R7].
 - **AI features (when `AI_PROVIDER` is not `"off"`):** three AI-powered features send document text to a language-model provider:
   - *Document analysis* — caseworker asks a question; the AI reads uploaded document text and returns a sourced answer (staff-only, never shown to clients).
   - *Document checks* — background job reads each uploaded document and flags expiry dates, names, and format issues (staff-only).
   - *Guidance check* — checks whether the documents on file satisfy an immigration rule (staff-only; caseworker reviews every result and can disagree).
   In all cases a qualified caseworker reviews the output and makes the decision; no action is taken solely by automated processing.
-  The portal uses **AWS Bedrock in the `eu-west-2` (London) region** by default, which keeps processing in the UK. Alternatively `AI_PROVIDER=anthropic` routes to Anthropic's own API [confirm data location and safeguard if used].
+  The portal uses **AWS Bedrock in the `eu-west-2` (London) region** as the intended option; whether processing stays in the UK depends on the chosen model being available in eu-west-2 without a cross-region profile (see R17). Alternatively `AI_PROVIDER=anthropic` routes to Anthropic's own API [confirm data location and safeguard if used].
   The AI provider receives document text only; it does not receive client names, case references or contact details from the portal directly (those may appear in uploaded documents). AWS does not use customer data to train models (AWS DPA). Anthropic's zero-data-retention enterprise policy applies when using Anthropic API direct [confirm zero-retention endpoint is configured].
 - **AI test cases:** admins may save a disagreed guidance-check result as an eval fixture. Before saving, the admin must manually replace all personal details with synthetic stand-ins and confirm they have done so; the portal applies automatic first-pass scrubbing (names, dates of birth, passport numbers, NI numbers, sort codes, account numbers, IBANs, postcodes, phone numbers). The resulting fixture is stored encrypted (AES-256-GCM) in the database, never on disk or in version control. These fixtures are used only to test and improve the AI pipeline and must never contain real personal data. The save action is admin-only, rate-limited, and audit-logged.
 
@@ -41,7 +41,7 @@ Large volumes of identity documents (passports), financial records and some **sp
 - Only documents on the visa checklist are requested; optional items are labelled optional.
 - Mobile number optional; no SMS; no tracking or advertising cookies.
 - Access limited by role (client → own case; caseworker → own clients; admin → firm).
-- [Lawful bases — see privacy notice draft; confirm Article 9 condition for special category data.]
+- Lawful bases as set out in the privacy notice: contract, legal obligation and legitimate interests (Article 6(1)(b), (c), (f)); special category data under Article 9(2)(f) (legal claims and legal advice). Confirmed by Hamza Tahir.
 - Clients are told what each document is for (one sentence per item) and given a privacy notice [link to be added
   to the portal sign-in and account-creation pages once approved].
 
@@ -55,7 +55,7 @@ Large volumes of identity documents (passports), financial records and some **sp
 | R4 | Malicious upload (malware) | Possible / High | Content-type check, ClamAV scan of every file, refuse if scanner down | Low |
 | R5 | Server breach | Unlikely / Severe | Firewall, key-only SSH, automatic security updates, documents not kept on the server (only encrypted, briefly, while waiting for OneDrive), secrets encrypted | Low–Medium |
 | R6 | **Documents stored in Microsoft 365 *Personal* OneDrive** | Possible / High | Access limited to an app folder; owner's Microsoft account protected by a strong password and 2FA [confirm]; files tied to one personal account; licence is for personal use; **data location not guaranteed UK** | **Medium–High — owner accepted for now (18 Oct 2026). Recommended: move to Microsoft 365 Business (UK) before scale; the portal already supports it.** |
-| R7 | Keeping data longer than needed | Likely / Medium | [No automatic deletion yet. Decide retention period; add a "close case / delete" process] | **Open** |
+| R7 | Keeping data longer than needed | Likely / Medium | Automatic retention-based deletion: 6 years after a case closes (configurable per firm), a daily job warns admins by email (30 days before) and deletes the case: all DB records, sessions, AI data, and the OneDrive folder (including `_Old versions`). Only a minimal audit entry (case ref, date, "deleted under retention policy") is kept. Admins can extend, delete early, or place a legal hold from Admin → Deletion. Backups roll off on their own within 30 days. Open cases are never deleted automatically. | **Resolved** |
 | R8 | Email mis-delivery or interception | Possible / Medium | Emails contain links, not documents; redo and caseworker-reply emails contain no case details or note text — only a prompt and a portal link; links single use and time-limited; reminders list document names only | Low |
 | R9 | Loss of data (deletion, ransomware) | Unlikely / High | Nightly encrypted backups (30 days, in OneDrive — same account as the documents, so keep an occasional offline copy), OneDrive version history, `_Old versions` never deleted, restore procedure documented | Low (once restore tested) |
 | R10 | Third-party data (partners/sponsors) without their knowledge | Likely / Medium | Partner/sponsor accounts: partner receives a direct invite email and is shown a privacy notice at account creation; acceptance is recorded in the audit log. Where a partner uploads documents that name a further third party (e.g. employer payslips), the client is advised to share the notice with that party. | Low |
@@ -70,12 +70,12 @@ Large volumes of identity documents (passports), financial records and some **sp
 
 ## 6. Actions before launch
 
-- [ ] Decide retention periods (R7) and how accounts/files are closed or deleted.
-- [ ] Decide on Microsoft 365 Personal vs Business (R6); if staying Personal, secure the Microsoft account with 2FA.
+- [x] Retention periods set (R7): 6 years after case closure (configurable). Automatic deletion with 30-day admin warning email, early-delete, extend, and legal-hold controls. Privacy notice updated.
+- [x] Microsoft 365 Personal kept (R6), accepted as a residual risk. Required safeguards: 2FA and a strong unique password on the Microsoft account, owner-only access, encrypted nightly backups. [ ] Confirm 2FA is switched on.
 - [ ] Approve and publish the privacy notice (now includes partner/sponsor and AI sections); link it in the portal.
 - [x] Partner/sponsor information — R10 resolved by direct-invite design with in-portal privacy notice. R14 added and mitigated.
 - [x] ICO registration confirmed: Uha Legal Limited, ZC187130 (registered 1 July 2026, renew by 30 June 2027).
-- [ ] Confirm Article 9 condition.
+- [x] Article 9 condition confirmed: 9(2)(f) legal claims and legal advice (Hamza Tahir).
 - [ ] Test a backup restore (R9).
 - [ ] Independent security test (see docs/security-review.md).
 - [ ] Pilot with 3 real clients and record feedback (section 3).
@@ -88,7 +88,7 @@ Large volumes of identity documents (passports), financial records and some **sp
 
 | Item | Name / role | Date | Decision |
 |---|---|---|---|
-| Measures approved | | | |
-| Residual risks accepted (incl. R6) | | | |
-| Data-protection advice | | | |
-| Review date | | | |
+| Measures approved | Hamza Tahir, Director | [date] | Approved |
+| Residual risks accepted (incl. R6) | Hamza Tahir, Director | [date] | Accepted, incl. staying on Microsoft 365 Personal (R6) |
+| Data-protection advice | Hamza Tahir (lawyer; data protection contact) | [date] | Lawful bases and Article 9(2)(f) condition confirmed |
+| Review date | Hamza Tahir, Director | Before AI is switched on, and at least every 12 months | — |

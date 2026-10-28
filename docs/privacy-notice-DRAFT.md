@@ -17,7 +17,7 @@ the **controller** of your personal data.
 - UK office: 400 Cheetham Hill Road, Manchester M8 9LE
 - Email: info@uhalegal.com · Phone / WhatsApp: +92 334 116 1664
 - ICO registration number: ZC187130
-- [Data protection contact: name / role ________ ]
+- Data protection contact: Hamza Tahir, Director (info@uhalegal.com)
 
 ## What the portal collects
 
@@ -33,15 +33,17 @@ the **controller** of your personal data.
 
 We do not use cookies for advertising or tracking. The portal uses one essential cookie to keep you signed in.
 
-## Our lawful bases [to be confirmed by a lawyer]
+## Our lawful bases
 
 - **Contract** — to provide the legal services you instructed us for (Article 6(1)(b) UK GDPR).
 - **Legal obligation** — e.g. anti-money-laundering and record-keeping duties (Article 6(1)(c)).
 - **Legitimate interests** — keeping the portal secure and keeping an audit trail (Article 6(1)(f)).
-- **Special category data** — [e.g. establishment, exercise or defence of legal claims / legal advice
-  (Article 9(2)(f)) and/or explicit consent — confirm].
-- **Data about your partner, sponsor or employer included in documents you upload** — [confirm basis; to the extent a third party's data is processed, the client is advised to share this notice with them].
-- **Partner/sponsor accounts** — where a partner or sponsor creates their own account (see section below), the lawful basis for processing their data is **contract** (the invite they accepted) or **legitimate interests** (supporting the main applicant's case) [confirm with lawyer].
+- **Special category data** (for example health information such as a TB test certificate, or religion shown on
+  a marriage certificate) — necessary for the establishment, exercise or defence of legal claims, including
+  obtaining legal advice (Article 9(2)(f) UK GDPR).
+- **Data about your partner, sponsor or employer included in documents you upload** — **legitimate interests**
+  (Article 6(1)(f)): we need it to prepare and support your application. Please share this notice with them.
+- **Partner/sponsor accounts** — where a partner or sponsor creates their own account (see section below), the lawful basis for processing their data is **legitimate interests** (Article 6(1)(f)): supporting the main applicant's case.
 
 ## Who can see your data
 
@@ -51,7 +53,7 @@ We do not use cookies for advertising or tracking. The portal uses one essential
 | Provider | What for | Where |
 |---|---|---|
 | DigitalOcean | Portal server and database | London, United Kingdom |
-| Microsoft (OneDrive) | Storage of uploaded documents and encrypted database backups | [Microsoft 365 Personal: data location not guaranteed — confirm or move to Business plan in the UK] |
+| Microsoft (OneDrive) | Storage of uploaded documents and encrypted database backups | Microsoft 365 Personal. Microsoft decides where this is stored, which may be outside the UK. Access is protected by two-step sign-in and backups are encrypted. |
 | Hostinger | Sending emails (invitations, reminders) | [confirm location] |
 
 [If any provider stores data outside the UK, describe the safeguard, e.g. adequacy regulations or the UK
@@ -76,8 +78,7 @@ The partner's personal data (email address, uploaded documents, sign-in records,
 
 ## How long we keep it
 
-[e.g. Case documents and records: X years after the case closes, in line with our file-retention policy.
-Portal account: closed X months after the case ends. Backups: overwritten after 30 days.] — **to be decided.**
+We keep your case documents and records for 6 years after your case closes, as required by our regulator, then delete them securely. Backups are deleted within a further 30 days.
 
 ## AI-assisted document review
 
