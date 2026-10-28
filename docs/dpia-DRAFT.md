@@ -74,7 +74,8 @@ Large volumes of identity documents (passports), financial records and some **sp
 - [ ] Decide on Microsoft 365 Personal vs Business (R6); if staying Personal, secure the Microsoft account with 2FA.
 - [ ] Approve and publish the privacy notice (now includes partner/sponsor and AI sections); link it in the portal.
 - [x] Partner/sponsor information — R10 resolved by direct-invite design with in-portal privacy notice. R14 added and mitigated.
-- [ ] Confirm ICO registration and Article 9 condition.
+- [x] ICO registration confirmed: Uha Legal Limited, ZC187130 (registered 1 July 2026, renew by 30 June 2027).
+- [ ] Confirm Article 9 condition.
 - [ ] Test a backup restore (R9).
 - [ ] Independent security test (see docs/security-review.md).
 - [ ] Pilot with 3 real clients and record feedback (section 3).

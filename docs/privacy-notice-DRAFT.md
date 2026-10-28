@@ -10,13 +10,13 @@
 
 ## Who we are
 
-UHA Legal ("we") provides UK immigration legal services. For the client portal at **portal.uhalegal.com**, we are
+UHA Legal Limited ("UHA Legal", "we") provides UK immigration legal services. For the client portal at **portal.uhalegal.com**, we are
 the **controller** of your personal data.
 
 - Lahore office: 507 High Q Tower, Jail Road, Gulberg, Lahore
-- [UK office: 400 Cheetham Hill Road, Manchester M9 8LE — confirm once operational]
+- UK office: 400 Cheetham Hill Road, Manchester M8 9LE
 - Email: info@uhalegal.com · Phone / WhatsApp: +92 334 116 1664
-- [ICO registration number: ________ ]
+- ICO registration number: ZC187130
 - [Data protection contact: name / role ________ ]
 
 ## What the portal collects
