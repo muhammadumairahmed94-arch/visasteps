@@ -1,7 +1,7 @@
 # UHA Legal Client Portal (VisaSteps)
 
 Client document portal for an immigration firm. See `../SPEC.md` for the full spec.
-**Status: Phase 5 (ready to deploy)** — Docker setup, backups, monitoring, security review and legal drafts done. Earlier phases: reminders, admin screen, HEIC conversion, virus scanning and browser tests. Files save to the owner's OneDrive (Microsoft 365 Personal); real email; caseworker 2FA; rate limits; audit log.
+**Status: Phase 5 (ready to deploy)** — Docker setup, backups, monitoring, security review and legal drafts done. AI guidance check, document analysis, requirements library and eval harness added. Earlier phases: reminders, admin screen, HEIC conversion, virus scanning and browser tests. Files save to the owner's OneDrive (Microsoft 365 Personal); real email; caseworker 2FA; rate limits; audit log.
 
 ## Run it
 
@@ -47,9 +47,11 @@ Uploaded files land in `./local-storage/Clients/{Surname}_{Firstname}_{CaseRef}/
 ## Checks
 
 ```bash
-npm test          # unit tests (naming, file type detection, PDF conversion)
+npm test                           # unit tests (545, incl. PII scrub, PDF, Microsoft Graph, HEIC, virus)
 npm run typecheck
 npm run lint
+npm run test:e2e                   # Playwright browser tests (desktop + phone at 375 / 360 px)
+AI_PROVIDER=fake npm run ai:eval   # AI eval harness against synthetic fixtures
 ```
 
 ## Phase 2: security and email
@@ -98,12 +100,51 @@ First admin on a live server: `npm run admin:create`.
 **Files.** iPhone HEIC photos convert to PDF. Every upload is virus-scanned by ClamAV (`VIRUS_SCAN="clamav"`); if the
 scanner is down, uploads are refused rather than let through. Local scanner: `brew services start clamav` (port 3310).
 
-**Tests.** `npm test` (29 unit tests, incl. simulated Microsoft Graph, EICAR virus test, HEIC) and
+**Tests.** `npm test` (545 unit tests, incl. PII scrubbing, Microsoft Graph, EICAR virus, HEIC) and
 `npm run test:e2e` — Playwright drives a real browser through: invite → account → upload → approve; upload → redo →
 re-upload (old file in `_Old versions`); a client cannot reach another client's documents; admin adds a caseworker
-and a checklist document. E2E uses its own database (`visasteps_test`), folders and file-based email.
+and a checklist document; phone-sized screens (375 px iPhone and 360 px Android) for every client-facing screen;
+accessibility checks (inputs labelled, buttons named, keyboard tab navigation). E2E uses its own database
+(`visasteps_test`), folders and file-based email.
 
 Real email is never sent to reserved test domains (`example.com`, `.example`, `.test`, `.invalid`).
+
+## Phase 5: AI features
+
+AI is off by default (`AI_PROVIDER="off"`) and toggled per firm by an admin. Set `AI_PROVIDER` in `.env` to enable.
+
+**AI guidance check** (`components/GuidanceCheckTab.tsx`, `app/api/staff/cases/[id]/guidance-check/`) —
+caseworkers click "Run guidance check" on a client case; the portal compares the uploaded documents against the
+approved immigration requirements and returns a per-requirement verdict (MET / NOT_MET / UNCLEAR). Caseworkers
+review each item and confirm or disagree. Results are stored encrypted (AES-256-GCM).
+
+**Document checks** (`app/api/staff/cases/[id]/doc-checks/`, `app/api/jobs/doc-checks/`) — background job (cron
+or admin button) reads each uploaded document and flags expiry dates, holder names and format issues. Staff-only.
+
+**Document analysis / Q&A** (`components/AnalyseTab.tsx`, `app/api/staff/cases/[id]/analysis/`) — caseworker
+asks a question in plain English; the portal reads the uploaded documents and returns a grounded answer with page
+citations. Staff-only. Requires `aiEnabled=true` on the firm.
+
+**Requirements library** (`components/RequirementsTab.tsx`, `app/api/admin/requirements/`) — admin uploads
+guidance PDFs, and an AI run extracts individual requirements (what is checked, evidence needed, citation). Admins
+approve, reject or edit each requirement before it is used for guidance checks.
+
+**Eval harness** (`scripts/eval-guidance.mts`, `evals/`) — `npm run ai:eval` runs the guidance-check pipeline
+against a set of test fixtures and reports pass/fail. Synthetic fixtures live in `evals/*.json`. Real-case fixtures
+saved by admins are stored encrypted in the database (`EvalFixture` table) and are never committed to git.
+
+**Save as test case** — admin clicks "Save as test case" on any disagreed guidance-check result. The portal scrubs
+PII automatically then shows an editor for final review; the admin ticks "I have removed all real personal details"
+before saving. Stored AES-256-GCM encrypted, audit-logged, admin-only, rate-limited.
+
+**Settings:**
+
+| Variable | Values | Notes |
+|---|---|---|
+| `AI_PROVIDER` | `off` \| `fake` \| `bedrock` \| `anthropic` | Default `off`. Use `fake` in dev / CI |
+| `AI_MODEL_ID` | e.g. `anthropic.claude-sonnet-4-5-20251001-v1:0` | Bedrock model ID |
+| `AWS_BEDROCK_REGION` | `eu-west-2` | Keep London for UK data residency |
+| `ANTHROPIC_API_KEY` | key | Direct Anthropic API only |
 
 ## Phase 5: going live
 
@@ -114,6 +155,6 @@ Everything for the live server is in this folder; nothing has been deployed yet.
   encrypted backups to OneDrive. `scripts/deploy.sh` builds on the Mac, copies and starts it. `npm run init:production` sets up the firm.
 - `/api/health` for the uptime monitor; alert emails to `ALERT_EMAIL` (errors, OneDrive, scanner, backups).
 - `docs/backup-restore.md`, `docs/security-review.md`, `docs/launch-checklist.md`.
-- **Drafts for legal review:** `docs/privacy-notice-DRAFT.md`, `docs/dpia-DRAFT.md`.
+- **Drafts for legal review:** `docs/privacy-notice-DRAFT.md` (includes AI section), `docs/dpia-DRAFT.md` (includes AI risks R15–R18).
 
 Dry-run of the full Docker setup on this Mac: `brew install colima docker docker-compose`, `colima start --memory 6`.

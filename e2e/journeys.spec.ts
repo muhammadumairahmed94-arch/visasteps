@@ -1215,9 +1215,10 @@ test.describe.serial("analysis tab — A1/A2/A3/A4/A5", () => {
       baseURL: E2E.APP_URL,
       extraHTTPHeaders: { Origin: E2E.APP_URL },
     });
-    await clientCtx.post("/api/auth/client/login", {
+    const loginRes = await clientCtx.post("/api/auth/client/login", {
       data: { email: "amina.khan@example.com", password: E2E.SEED_CLIENT_PASSWORD },
     });
+    expect(loginRes.ok(), `Amina login failed: ${loginRes.status()} — check rate limits`).toBe(true);
 
     const portalRes = await clientCtx.get("/api/client/portal");
     expect(portalRes.status()).toBe(200);
@@ -1323,9 +1324,10 @@ test.describe.serial("doc-checks — D1/D2", () => {
       baseURL: E2E.APP_URL,
       extraHTTPHeaders: { Origin: E2E.APP_URL },
     });
-    await clientCtx.post("/api/auth/client/login", {
+    const d1LoginRes = await clientCtx.post("/api/auth/client/login", {
       data: { email: "amina.khan@example.com", password: E2E.SEED_CLIENT_PASSWORD },
     });
+    expect(d1LoginRes.ok(), `Amina login failed: ${d1LoginRes.status()} — check rate limits`).toBe(true);
     const portalRes = await clientCtx.get("/api/client/portal");
     expect(portalRes.status()).toBe(200);
     const portal = await portalRes.json() as {

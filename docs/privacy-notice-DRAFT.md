@@ -79,6 +79,22 @@ The partner's personal data (email address, uploaded documents, sign-in records,
 [e.g. Case documents and records: X years after the case closes, in line with our file-retention policy.
 Portal account: closed X months after the case ends. Backups: overwritten after 30 days.] — **to be decided.**
 
+## AI-assisted document review
+
+To help our caseworkers work accurately and quickly, your uploaded documents may be read by an AI service.
+
+The AI is used only by our caseworkers, never to give you advice directly. Here is what it does:
+
+- It reads the text in your documents and flags things like expiry dates, names and document type.
+- It checks whether the documents you have sent meet the immigration rules for your visa route.
+- It can answer a caseworker's question about your case using text it finds in your documents.
+
+A qualified caseworker reviews every AI finding and makes the final decision. No decision about your case is made by the AI alone.
+
+The AI service we use is **[AWS Bedrock in Amazon's London data centre / Anthropic — confirm which]**. The provider does not use your data to train its AI models. Document text is sent only for the purpose of the analysis above and is not stored by the provider after the response is returned.
+
+You can ask us to have your case reviewed without any AI tools. Email info@uhalegal.com.
+
 ## How we protect it
 
 Encrypted connections (HTTPS); documents stored in our OneDrive, with any temporary copy on the server
