@@ -20,7 +20,7 @@ const visible = (u: User) =>
 export async function setCaseClosed(u: User, clientId: string, closed: boolean) {
   const client = await db.client.findFirst({ where: { id: clientId, ...visible(u) } });
   if (!client) throw new UserError("Not found.");
-  await db.client.update({ where: { id: client.id }, data: { closedAt: closed ? new Date() : null } });
+  await db.client.update({ where: { id: client.id }, data: { closedAt: closed ? new Date() : null, ...(closed ? {} : { retainUntil: null }) } });
   if (closed) {
     // Auto-cancel any active sponsor account before closing the main case
     await cancelSponsor(client.id, u);

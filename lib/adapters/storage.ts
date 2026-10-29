@@ -26,6 +26,8 @@ export interface StorageAdapter {
   /** Files directly inside a folder (used to prune old backups). Missing folder = empty list. */
   list(folder: FolderPath): Promise<StoredItem[]>;
   remove(itemId: string): Promise<void>;
+  /** Delete a folder and all its contents recursively. No-op if the folder does not exist. */
+  deleteFolder(folder: FolderPath): Promise<void>;
 }
 
 /** Strips characters OneDrive / SharePoint reject in names. */
@@ -103,6 +105,10 @@ class LocalStorage implements StorageAdapter {
 
   async remove(itemId: string) {
     await rm(this.resolve(itemId.split("/")), { force: true });
+  }
+
+  async deleteFolder(folder: FolderPath) {
+    await rm(this.resolve(folder), { recursive: true, force: true });
   }
 }
 

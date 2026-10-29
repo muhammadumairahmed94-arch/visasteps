@@ -13,7 +13,7 @@ import type { AnalysisView } from "@/lib/case-analysis";
 import { STAFF_LABEL, Page, Row, StatusPill, Tabs, api, useHashView, useToast, type Status } from "./ui";
 
 type Tab = "review" | "missing" | "folders" | "client" | "messages" | "analyse" | "guidance-check";
-type AdminTab = "team" | "firm" | "checklists";
+type AdminTab = "team" | "firm" | "checklists" | "deletion";
 type View = { screen: "list" } | { screen: "new" } | { screen: "admin"; tab: AdminTab } | { screen: "guidance" } | { screen: "requirements" } | { screen: "case"; id: string; tab: Tab; group?: string; doc?: string };
 type Home = {
   me: { id: string; name: string; role: "ADMIN" | "CASEWORKER" };
@@ -427,6 +427,15 @@ function CaseView({
           </>
         )}
         <SponsorCard clientId={view.id} sponsor={data.client.sponsor} closed={!!data.client.closedAt} toast={toast} onChange={() => void load()} />
+        {admin && (
+          <LegalHold
+            clientId={view.id}
+            legalHold={data.client.legalHold}
+            legalHoldReason={data.client.legalHoldReason}
+            toast={toast}
+            onChange={() => void load()}
+          />
+        )}
         <CaseActions
           clientId={view.id}
           caseRef={data.client.caseRef}
@@ -717,6 +726,47 @@ function ShareLink({ clientId, accountCreated, toast }: { clientId: string; acco
             Send by WhatsApp
           </a>
           <textarea readOnly rows={4} value={shared.message} aria-label="Message with link" onFocus={(e) => e.currentTarget.select()} />
+        </>
+      )}
+    </section>
+  );
+}
+
+/** Legal hold: prevent a closed case from being auto-deleted under the retention policy (admin only). */
+function LegalHold({ clientId, legalHold, legalHoldReason, toast, onChange }: {
+  clientId: string; legalHold: boolean; legalHoldReason: string | null; toast: (m: string) => void; onChange: () => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [reason, setReason] = useState(legalHoldReason ?? "");
+
+  async function toggle() {
+    const placing = !legalHold;
+    if (placing && !reason.trim()) { toast("Enter a reason for the legal hold."); return; }
+    if (!placing && !window.confirm(`Remove the legal hold from this case? It will be eligible for deletion under the retention policy again.`)) return;
+    setBusy(true);
+    const r = await api<{ message: string }>(`/api/staff/cases/${clientId}/hold`, { method: "POST", json: { hold: placing, reason } });
+    setBusy(false);
+    toast(r.ok ? r.data.message : r.error);
+    if (r.ok) onChange();
+  }
+
+  return (
+    <section className="detail" aria-labelledby="hold-h">
+      <h2 id="hold-h">Legal hold</h2>
+      {legalHold ? (
+        <>
+          <p className="note">This case is on legal hold and will not be deleted automatically.</p>
+          {legalHoldReason && <p className="muted">Reason: {legalHoldReason}</p>}
+          <button type="button" className="ghost" disabled={busy} onClick={toggle}>Remove legal hold</button>
+        </>
+      ) : (
+        <>
+          <p className="muted">Place a hold to prevent this case being deleted when it reaches its retention due date.</p>
+          <div className="field">
+            <label htmlFor="hold-reason">Reason for hold</label>
+            <input id="hold-reason" className="input" value={reason} onChange={(e) => setReason(e.target.value)} placeholder="e.g. Active litigation" />
+          </div>
+          <button type="button" className="ghost" disabled={busy || !reason.trim()} onClick={toggle}>Place legal hold</button>
         </>
       )}
     </section>

@@ -107,6 +107,7 @@ model Firm {
   oneDriveConfig          Json?
   nextCaseNumber          Int                  @default(1000)
   reviewDays              Int                  @default(2)
+  retentionYears          Int                  @default(6)
   aiEnabled               Boolean              @default(false)
   analysisHistoryEnabled  Boolean              @default(true)
   guidanceReviewMonths    Int                  @default(3)
@@ -183,6 +184,12 @@ model Client {
   reminderCount    Int              @default(0) // "missing documents" reminders sent (max 5)
   lastReminderAt   DateTime?
   closedAt         DateTime? // case closed: client cannot sign in, no reminders; data kept
+  legalHold        Boolean          @default(false)
+  legalHoldReason  String?
+  legalHoldAt      DateTime?
+  retainUntil      DateTime? // explicit admin-set extension date; due = max(closedAt+retentionYears, retainUntil)
+  deletionPendingAt  DateTime? // set when OneDrive deletion failed; excluded from normal views; retried daily
+  deletionPendingTries Int @default(0) // count of failed OneDrive deletion attempts
   failedLogins     Int              @default(0)
   lockedUntil      DateTime?
   createdAt        DateTime         @default(now())

@@ -1458,3 +1458,105 @@ test.describe.serial("guidance-check — E1/E2/E3", () => {
     expect(body.error).toContain("approved requirements");
   });
 });
+
+/* ── F: Retention and legal hold ──────────────────────────────────────────── */
+
+test.describe.serial("F: Retention and legal hold (API-only)", () => {
+  const mutHeaders = { Origin: E2E.APP_URL };
+  let closedClientId = "";
+
+  test.beforeAll(async () => {
+    // Find the seeded Amina Khan case and close it so retention logic applies
+    const casesRes = await sharedStaffPage.request.get("/api/staff/cases");
+    const casesData = await casesRes.json() as { cases: { id: string; caseRef: string; closed: boolean }[] };
+    const amina = casesData.cases.find((c) => c.caseRef === "IM-2041");
+    expect(amina, "seeded client IM-2041 must exist").toBeTruthy();
+    closedClientId = amina!.id;
+
+    // Close the case so it appears in retention queries
+    if (!amina!.closed) {
+      const closeRes = await sharedStaffPage.request.post(
+        `/api/staff/cases/${closedClientId}/close`,
+        { headers: mutHeaders, data: JSON.stringify({ closed: true }) },
+      );
+      expect(closeRes.status()).toBe(200);
+    }
+  });
+
+  test.afterAll(async () => {
+    // Reopen the case so subsequent test suites still have an active client
+    await sharedStaffPage.request.post(
+      `/api/staff/cases/${closedClientId}/close`,
+      { headers: mutHeaders, data: JSON.stringify({ closed: false }) },
+    );
+    // Remove any legal hold set during tests
+    await sharedStaffPage.request.post(
+      `/api/staff/cases/${closedClientId}/hold`,
+      { headers: mutHeaders, data: JSON.stringify({ hold: false, reason: "" }) },
+    );
+  });
+
+  test("F1: GET /api/admin/retention returns 200 for admin", async () => {
+    const res = await sharedStaffPage.request.get("/api/admin/retention");
+    expect(res.status()).toBe(200);
+    const data = await res.json() as unknown[];
+    expect(Array.isArray(data)).toBe(true);
+  });
+
+  test("F2: GET /api/admin/retention returns 403 for client session", async ({ playwright }) => {
+    const ctx = await playwright.request.newContext({ baseURL: E2E.APP_URL, extraHTTPHeaders: { Origin: E2E.APP_URL } });
+    const loginRes = await ctx.post("/api/auth/client/login", {
+      data: { email: "amina.khan@example.com", password: E2E.SEED_CLIENT_PASSWORD },
+    });
+    expect(loginRes.ok(), `Client login failed: ${loginRes.status()}`).toBe(true);
+    const retRes = await ctx.get("/api/admin/retention");
+    expect(retRes.status()).toBe(403);
+    await ctx.dispose();
+  });
+
+  test("F3: PATCH /api/admin/retention/[id] extends retention", async () => {
+    const res = await sharedStaffPage.request.patch(
+      `/api/admin/retention/${closedClientId}`,
+      { headers: mutHeaders, data: JSON.stringify({ extraYears: 1 }) },
+    );
+    expect(res.status()).toBe(200);
+    const body = await res.json() as { message: string };
+    expect(body.message).toContain("extended");
+  });
+
+  test("F4: POST /api/staff/cases/[id]/hold places a legal hold", async () => {
+    const res = await sharedStaffPage.request.post(
+      `/api/staff/cases/${closedClientId}/hold`,
+      { headers: mutHeaders, data: JSON.stringify({ hold: true, reason: "E2E test hold" }) },
+    );
+    expect(res.status()).toBe(200);
+    const body = await res.json() as { message: string };
+    expect(body.message).toContain("Legal hold placed");
+  });
+
+  test("F5: DELETE /api/admin/retention/[id] returns 400 when case is on legal hold", async () => {
+    const res = await sharedStaffPage.request.delete(
+      `/api/admin/retention/${closedClientId}`,
+      { headers: mutHeaders },
+    );
+    expect(res.status()).toBe(400);
+    const body = await res.json() as { error: string };
+    expect(body.error).toContain("legal hold");
+  });
+
+  test("F6: open cases do not appear in the retention list", async () => {
+    // Reopen first so it's genuinely open
+    await sharedStaffPage.request.post(
+      `/api/staff/cases/${closedClientId}/close`,
+      { headers: mutHeaders, data: JSON.stringify({ closed: false }) },
+    );
+    const res = await sharedStaffPage.request.get("/api/admin/retention");
+    const data = await res.json() as { id: string }[];
+    expect(data.every((c) => c.id !== closedClientId)).toBe(true);
+    // Re-close for afterAll cleanup
+    await sharedStaffPage.request.post(
+      `/api/staff/cases/${closedClientId}/close`,
+      { headers: mutHeaders, data: JSON.stringify({ closed: true }) },
+    );
+  });
+});

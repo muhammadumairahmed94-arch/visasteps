@@ -304,6 +304,16 @@ export class GraphStorage implements StorageAdapter {
     const res = await this.call(`${(await this.base()).items}/${encodeURIComponent(itemId)}`, { method: "DELETE" });
     if (!res.ok && res.status !== 404) await this.json(res, "Delete test item");
   }
+
+  async deleteFolder(folder: FolderPath) {
+    const item = await this.itemByPath(folder);
+    if (!item) return; // already gone — no-op
+    const res = await this.call(`${(await this.base()).items}/${encodeURIComponent(item.id)}`, { method: "DELETE" });
+    if (!res.ok && res.status !== 404) await this.json(res, `Delete folder ${folder.at(-1)}`);
+    // Evict any cached folder paths under this tree
+    const prefix = folder.join("/");
+    for (const k of this.folders) if (k === prefix || k.startsWith(prefix + "/")) this.folders.delete(k);
+  }
 }
 
 /** Personal OneDrive (Microsoft 365 Personal/Family): STORAGE_PROVIDER="onedrive", sign-in saved by npm run setup:onedrive. */

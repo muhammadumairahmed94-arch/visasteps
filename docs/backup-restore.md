@@ -13,6 +13,10 @@ If a backup fails, or none succeeds for 26 hours, an alert goes to `ALERT_EMAIL`
 `"backup": "late"`. Backups and documents share one OneDrive account, so also keep an occasional backup file
 somewhere else (e.g. download one a month to an encrypted USB drive).
 
+## OneDrive recycle bin
+
+OneDrive keeps deleted items in its recycle bin for a period before removing them permanently. Check the recycle bin settings for the Microsoft account to confirm how long items are kept — files deleted under the retention policy may still be recoverable from the recycle bin for some time after deletion. Backups roll off within 30 days.
+
 ## Run one now
 
 ```bash

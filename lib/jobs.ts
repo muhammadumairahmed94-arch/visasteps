@@ -6,6 +6,7 @@ import { notifyOps } from "./alerts";
 import { processDraftRuns } from "./draft-runs";
 import { processDocCheckRuns } from "./doc-check-runs";
 import { processGuidanceCheckRuns } from "./guidance-check-runs";
+import { runRetentionJob } from "./retention";
 
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
@@ -14,7 +15,7 @@ const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
  * Hosts without one call /api/jobs/storage and /api/jobs/reminders on a schedule instead.
  */
 export function startBackgroundJobs() {
-  const g = globalThis as unknown as { jobsTimer?: NodeJS.Timeout; lastReminders?: number };
+  const g = globalThis as unknown as { jobsTimer?: NodeJS.Timeout; lastReminders?: number; lastRetention?: number };
   if (g.jobsTimer) return;
   (globalThis as unknown as { jobsStartedAt?: number }).jobsStartedAt = Date.now();
   g.jobsTimer = setInterval(async () => {
@@ -35,6 +36,11 @@ export function startBackgroundJobs() {
           const started = (globalThis as unknown as { jobsStartedAt?: number }).jobsStartedAt ?? Date.now();
           if ((age === null && Date.now() - started > 26 * 3_600_000) || (age !== null && age > 26))
             await notifyOps("backup-missing", "no successful backup in over a day", `The last successful nightly backup was ${age === null ? "never recorded" : `${Math.round(age)} hours ago`}.\nCheck on the server: docker compose logs backup`, 24 * 60);
+        }
+        // Retention: run once per 24 hours
+        if (!g.lastRetention || Date.now() - g.lastRetention > 24 * 60 * 60_000) {
+          g.lastRetention = Date.now();
+          await runRetentionJob();
         }
       }
     } catch (e) {

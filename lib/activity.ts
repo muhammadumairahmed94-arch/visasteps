@@ -97,6 +97,11 @@ export const TEXT: Record<string, string> = {
   "case.guidancecheck.agree":   "Agreed with guidance check result",
   "case.guidancecheck.disagree": "Disagreed with guidance check result",
   "case.guidancecheck.savetestcase": "Saved disagreed result as eval test case",
+  // Retention
+  "retention.delete":    "Case deleted under retention policy",
+  "retention.extend":    "Retention extended",
+  "retention.hold.set":  "Legal hold placed",
+  "retention.hold.clear": "Legal hold removed",
   // Requirements
   "requirement.draft":             "Requirements draft started",
   "requirement.edit":              "Draft requirement edited",

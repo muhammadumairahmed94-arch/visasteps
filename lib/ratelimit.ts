@@ -30,6 +30,8 @@ export const LIMITS = {
   guidanceUpload:      { max: 20, window: 60 * MIN },  // per admin user: guidance file uploads
   requirementsDraft:   { max: 5,  window: 60 * MIN },  // per admin user: start a requirements draft run
   evalSaveTestCase:    { max: 30, window: 60 * MIN },  // per admin user: save disagreed result as eval fixture
+  adminRetention:      { max: 30, window: 60 * MIN },  // per admin user: extend / delete under retention policy
+  caseHold:            { max: 30, window: 60 * MIN },  // per admin user: set or clear a legal hold
 } as const;
 
 export type LimitName = keyof typeof LIMITS;

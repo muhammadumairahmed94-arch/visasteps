@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState, type FormEvent } from "react";
 import type { AdminView } from "@/lib/admin";
 import { Tabs, api } from "./ui";
 
-type Tab = "team" | "firm" | "checklists";
+type Tab = "team" | "firm" | "checklists" | "deletion";
 type User = AdminView["users"][number];
 type Route = AdminView["routes"][number];
 type Item = Route["items"][number];
@@ -42,7 +42,7 @@ export default function AdminPanel({ tab, setTab, onBack, toast }: { tab: Tab; s
         <p className="eyebrow">Admin</p>
         <h1 data-focus tabIndex={-1}>Firm settings</h1>
       </section>
-      <Tabs<Tab> label="Admin sections" tabs={[["team", "Team"], ["firm", "Firm"], ["checklists", "Checklists"]]} value={tab} onChange={setTab} />
+      <Tabs<Tab> label="Admin sections" tabs={[["team", "Team"], ["firm", "Firm"], ["checklists", "Checklists"], ["deletion", "Deletion"]]} value={tab} onChange={setTab} />
       <div id="panel" role="tabpanel" aria-labelledby={`tab-${tab}`} className="stack">
         {error && <p className="error" role="alert">{error}</p>}
         {!data ? (
@@ -51,6 +51,8 @@ export default function AdminPanel({ tab, setTab, onBack, toast }: { tab: Tab; s
           <Team data={data} run={run} />
         ) : tab === "firm" ? (
           <Firm data={data} run={run} />
+        ) : tab === "deletion" ? (
+          <Deletion toast={toast} />
         ) : (
           <Checklists data={data} run={run} />
         )}
@@ -210,6 +212,11 @@ function Firm({ data, run }: { data: AdminView; run: Run }) {
           <label htmlFor="f-days">Days to review documents</label>
           <input id="f-days" name="reviewDays" type="number" className="input" min="1" max="30" defaultValue={data.firm.reviewDays} required aria-describedby="f-days-hint" />
           <p id="f-days-hint" className="hint">Clients see: &ldquo;Your caseworker usually checks documents within N working days.&rdquo;</p>
+        </div>
+        <div className="field">
+          <label htmlFor="f-retention">Retention period (years)</label>
+          <input id="f-retention" name="retentionYears" type="number" className="input" min="1" max="30" defaultValue={data.firm.retentionYears} required aria-describedby="f-retention-hint" />
+          <p id="f-retention-hint" className="hint">Cases are due for deletion this many years after they are closed. Open cases are never deleted automatically.</p>
         </div>
         <div className="field">
           <label htmlFor="f-grm">Guidance review period (months)</label>
@@ -432,6 +439,92 @@ function AddItem({ route, run, onDone }: { route: Route; run: Run; onDone: () =>
         <button className="big" disabled={busy}>{busy ? "Adding…" : "Add"}</button>
       </div>
     </form>
+  );
+}
+
+/* ---------- Deletion ---------- */
+
+type RetentionCase = {
+  id: string;
+  caseRef: string;
+  name: string;
+  closedAt: string;
+  dueAt: string;
+  daysUntilDue: number;
+  legalHold: boolean;
+  legalHoldReason: string | null;
+  retainUntil: string | null;
+  deletionPendingAt: string | null;
+  deletionPendingTries: number;
+};
+
+function Deletion({ toast }: { toast: (m: string) => void }) {
+  const [cases, setCases] = useState<RetentionCase[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+
+  const load = useCallback(() => api<RetentionCase[]>("/api/admin/retention").then((r) => {
+    if (r.ok) setCases(r.data); else setError(r.error);
+  }), []);
+
+  useEffect(() => { void load(); }, [load]);
+
+  async function deleteCase(c: RetentionCase) {
+    if (!confirm(`Delete ${c.caseRef} (${c.name})?\n\nThis removes the portal record and the OneDrive folder. The audit entry is kept. This cannot be undone.`)) return;
+    setBusy(c.id);
+    const r = await api<{ message: string }>(`/api/admin/retention/${c.id}`, { method: "DELETE" });
+    setBusy(null);
+    toast(r.ok ? r.data.message : r.error);
+    await load();
+  }
+
+  async function extendCase(c: RetentionCase) {
+    const raw = prompt(`Extend retention for ${c.caseRef} by how many extra years? (1–10)`, "1");
+    if (!raw) return;
+    const extraYears = Number(raw.trim());
+    if (!Number.isInteger(extraYears) || extraYears < 1 || extraYears > 10) { toast("Enter a whole number between 1 and 10."); return; }
+    const reason = prompt(`Reason for extending ${c.caseRef} (required — saved to audit log):`);
+    if (!reason?.trim()) { toast("Enter a reason for the extension."); return; }
+    setBusy(c.id);
+    const r = await api<{ message: string }>(`/api/admin/retention/${c.id}`, { method: "PATCH", json: { extraYears, reason: reason.trim() } });
+    setBusy(null);
+    toast(r.ok ? r.data.message : r.error);
+    await load();
+  }
+
+  if (error) return <p className="error" role="alert">{error}</p>;
+  if (!cases) return <p className="muted" role="status">Loading…</p>;
+
+  if (cases.length === 0)
+    return (
+      <section className="detail">
+        <h2>Due for deletion</h2>
+        <p className="muted">No closed cases are due or within 30 days of being due.</p>
+      </section>
+    );
+
+  return (
+    <section className="detail">
+      <h2>Due for deletion</h2>
+      <p className="hint">Closed cases within 30 days of their retention due date, or already overdue. Open cases are never shown here.</p>
+      {cases.map((c) => (
+        <div key={c.id} className="row" style={{ alignItems: "flex-start", gap: "0.75rem" }}>
+          <span style={{ flex: 1 }}>
+            <b>{c.caseRef}</b> — {c.name}
+            <br />
+            <span className="muted">Closed {c.closedAt} · Due {c.dueAt}</span>
+            {c.legalHold && <><br /><span className="note">Legal hold{c.legalHoldReason ? `: ${c.legalHoldReason}` : ""}</span></>}
+            {c.deletionPendingAt && <><br /><span className="error">Deletion pending — OneDrive unreachable ({c.deletionPendingTries} attempt{c.deletionPendingTries === 1 ? "" : "s"})</span></>}
+            {!c.deletionPendingAt && c.daysUntilDue <= 0 && !c.legalHold && <><br /><span className="error">Overdue by {Math.abs(c.daysUntilDue)} day{Math.abs(c.daysUntilDue) === 1 ? "" : "s"}</span></>}
+            {!c.deletionPendingAt && c.daysUntilDue > 0 && <><br /><span className="muted">{c.daysUntilDue} day{c.daysUntilDue === 1 ? "" : "s"} remaining</span></>}
+          </span>
+          <span style={{ display: "flex", gap: "0.5rem", flexShrink: 0 }}>
+            <button type="button" className="mini" disabled={!!busy} onClick={() => extendCase(c)}>Extend</button>
+            {!c.legalHold && <button type="button" className="mini danger" disabled={!!busy} onClick={() => deleteCase(c)}>{busy === c.id ? "Deleting…" : "Delete"}</button>}
+          </span>
+        </div>
+      ))}
+    </section>
   );
 }
 

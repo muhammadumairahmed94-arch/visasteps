@@ -162,8 +162,8 @@ export type PortalView = ClientPortalView | SponsorPortalView;
  *  sponsorForClientId: null ensures sponsor sub-accounts never surface as cases. */
 export const visibleCases = (u: User) =>
   u.role === "ADMIN"
-    ? { firmId: u.firmId, sponsorForClientId: null }
-    : { firmId: u.firmId, caseworkerId: u.id, sponsorForClientId: null };
+    ? { firmId: u.firmId, sponsorForClientId: null, deletionPendingAt: null }
+    : { firmId: u.firmId, caseworkerId: u.id, sponsorForClientId: null, deletionPendingAt: null };
 
 export async function staffCaseList(u: User) {
   const clients = await db.client.findMany({
@@ -226,6 +226,8 @@ export async function staffCaseView(u: User, clientId: string) {
       email: c.email,
       accountCreated: !!c.accountCreatedAt,
       closedAt: c.closedAt ? ukDate(c.closedAt) : null,
+      legalHold: c.legalHold,
+      legalHoldReason: c.legalHoldReason,
       plannedSubmissionDate: c.plannedSubmissionDate ? c.plannedSubmissionDate.toISOString().slice(0, 10) : null,
       caseStage: c.caseStage,
       reminders: reminderSummary(c, c.documents.filter((d) => shown(d) && d.status === "NEED" && d.checklistItem.required && resolvedOwner(d, sponsorActive) === "CLIENT").length),
