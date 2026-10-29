@@ -6,7 +6,7 @@
 
 # Client portal privacy notice — UHA Legal
 
-**Last updated:** [date]
+**Last updated:** 28 October 2026
 
 ## Who we are
 
@@ -54,7 +54,7 @@ We do not use cookies for advertising or tracking. The portal uses one essential
 |---|---|---|
 | DigitalOcean | Portal server and database | London, United Kingdom |
 | Microsoft (OneDrive) | Storage of uploaded documents and encrypted database backups | Microsoft 365 Personal. Microsoft decides where this is stored, which may be outside the UK. Access is protected by two-step sign-in and backups are encrypted. |
-| Hostinger | Sending emails (invitations, reminders) | [confirm location] |
+| Hostinger | Sending emails (invitations, reminders) | United Kingdom |
 
 [If any provider stores data outside the UK, describe the safeguard, e.g. adequacy regulations or the UK
 International Data Transfer Agreement.]

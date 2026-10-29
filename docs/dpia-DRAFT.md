@@ -3,7 +3,7 @@
 > Prepared by an AI assistant from the portal's design. The firm's data-protection lead and a lawyer must review,
 > complete the **[bracketed]** items, decide on the risks, and sign section 7 before real client data is stored.
 
-**Project:** UHA Legal client document portal (portal.uhalegal.com)  **Version:** 0.1  **Date:** [ ]
+**Project:** UHA Legal client document portal (portal.uhalegal.com)  **Version:** 1.0  **Date:** 28 October 2026
 
 ## 1. Why a DPIA is needed
 
@@ -54,7 +54,7 @@ Large volumes of identity documents (passports), financial records and some **sp
 | R3 | A client seeing another client's documents | Possible / Severe | Every query scoped to the client; automated test proves isolation | Low |
 | R4 | Malicious upload (malware) | Possible / High | Content-type check, ClamAV scan of every file, refuse if scanner down | Low |
 | R5 | Server breach | Unlikely / Severe | Firewall, key-only SSH, automatic security updates, documents not kept on the server (only encrypted, briefly, while waiting for OneDrive), secrets encrypted | Low–Medium |
-| R6 | **Documents stored in Microsoft 365 *Personal* OneDrive** | Possible / High | Access limited to an app folder; owner's Microsoft account protected by a strong password and 2FA [confirm]; files tied to one personal account; licence is for personal use; **data location not guaranteed UK** | **Medium–High — owner accepted for now (18 Oct 2026). Recommended: move to Microsoft 365 Business (UK) before scale; the portal already supports it.** |
+| R6 | **Documents stored in Microsoft 365 *Personal* OneDrive** | Possible / High | Access limited to an app folder; owner's Microsoft account protected by a strong password and 2FA (confirmed 29 October 2026); files tied to one personal account; licence is for personal use; **data location not guaranteed UK** | **Medium–High — owner accepted for now (18 Oct 2026). Recommended: move to Microsoft 365 Business (UK) before scale; the portal already supports it.** |
 | R7 | Keeping data longer than needed | Likely / Medium | Automatic retention-based deletion: 6 years after a case closes (configurable per firm), a daily job warns admins by email (30 days before) and deletes the case: all DB records, sessions, AI data, and the OneDrive folder (including `_Old versions`). Only a minimal audit entry (case ref, date, "deleted under retention policy") is kept. Admins can extend, delete early, or place a legal hold from Admin → Deletion. Backups roll off on their own within 30 days. Open cases are never deleted automatically. | **Resolved** |
 | R8 | Email mis-delivery or interception | Possible / Medium | Emails contain links, not documents; redo and caseworker-reply emails contain no case details or note text — only a prompt and a portal link; links single use and time-limited; reminders list document names only | Low |
 | R9 | Loss of data (deletion, ransomware) | Unlikely / High | Nightly encrypted backups (30 days, in OneDrive — same account as the documents, so keep an occasional offline copy), OneDrive version history, `_Old versions` never deleted, restore procedure documented | Low (once restore tested) |
@@ -71,7 +71,7 @@ Large volumes of identity documents (passports), financial records and some **sp
 ## 6. Actions before launch
 
 - [x] Retention periods set (R7): 6 years after case closure (configurable). Automatic deletion with 30-day admin warning email, early-delete, extend, and legal-hold controls. Privacy notice updated.
-- [x] Microsoft 365 Personal kept (R6), accepted as a residual risk. Required safeguards: 2FA and a strong unique password on the Microsoft account, owner-only access, encrypted nightly backups. [ ] Confirm 2FA is switched on.
+- [x] Microsoft 365 Personal kept (R6), accepted as a residual risk. Required safeguards: 2FA and a strong unique password on the Microsoft account, owner-only access, encrypted nightly backups. 2FA confirmed switched on (29 October 2026).
 - [ ] Approve and publish the privacy notice (now includes partner/sponsor and AI sections); link it in the portal.
 - [x] Partner/sponsor information — R10 resolved by direct-invite design with in-portal privacy notice. R14 added and mitigated.
 - [x] ICO registration confirmed: Uha Legal Limited, ZC187130 (registered 1 July 2026, renew by 30 June 2027).
@@ -88,7 +88,7 @@ Large volumes of identity documents (passports), financial records and some **sp
 
 | Item | Name / role | Date | Decision |
 |---|---|---|---|
-| Measures approved | Hamza Tahir, Director | [date] | Approved |
-| Residual risks accepted (incl. R6) | Hamza Tahir, Director | [date] | Accepted, incl. staying on Microsoft 365 Personal (R6) |
-| Data-protection advice | Hamza Tahir (lawyer; data protection contact) | [date] | Lawful bases and Article 9(2)(f) condition confirmed |
+| Measures approved | Hamza Tahir, Director | 28 October 2026 | Approved |
+| Residual risks accepted (incl. R6) | Hamza Tahir, Director | 28 October 2026 | Accepted, incl. staying on Microsoft 365 Personal (R6) |
+| Data-protection advice | Hamza Tahir (lawyer; data protection contact) | 28 October 2026 | Lawful bases and Article 9(2)(f) condition confirmed |
 | Review date | Hamza Tahir, Director | Before AI is switched on, and at least every 12 months | — |
