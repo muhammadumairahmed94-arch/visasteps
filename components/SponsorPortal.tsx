@@ -84,6 +84,7 @@ export default function SponsorPortal({ token: linkToken }: { token?: string }) 
             {data.firm.name} and UK Visas &amp; Immigration as part of the application. You can ask us to
             correct or delete your information at any time by emailing {data.firm.name}.
           </p>
+          <p className="muted"><a href="/privacy" target="_blank" rel="noopener noreferrer">Read our full privacy notice</a></p>
           <button
             type="button"
             className="big"

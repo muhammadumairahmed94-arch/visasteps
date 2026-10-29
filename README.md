@@ -155,6 +155,6 @@ Everything for the live server is in this folder; nothing has been deployed yet.
   encrypted backups to OneDrive. `scripts/deploy.sh` builds on the Mac, copies and starts it. `npm run init:production` sets up the firm.
 - `/api/health` for the uptime monitor; alert emails to `ALERT_EMAIL` (errors, OneDrive, scanner, backups).
 - `docs/backup-restore.md`, `docs/security-review.md`, `docs/launch-checklist.md`.
-- **Drafts for legal review:** `docs/privacy-notice-DRAFT.md` (includes AI section), `docs/dpia-DRAFT.md` (includes AI risks R15–R18).
+- **Legal docs:** `docs/privacy-notice.md` (published at /privacy; AI section saved separately in `docs/privacy-notice-ai-section.md`), `docs/dpia.md` (signed 28 Oct 2026; AI risks R15–R18 gated on R17).
 
 Dry-run of the full Docker setup on this Mac: `brew install colima docker docker-compose`, `colima start --memory 6`.

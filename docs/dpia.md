@@ -1,7 +1,4 @@
-# ⚠️ DRAFT — Data Protection Impact Assessment (DPIA) — needs review and sign-off ⚠️
-
-> Prepared by an AI assistant from the portal's design. The firm's data-protection lead and a lawyer must review,
-> complete the **[bracketed]** items, decide on the risks, and sign section 7 before real client data is stored.
+# Data Protection Impact Assessment
 
 **Project:** UHA Legal client document portal (portal.uhalegal.com)  **Version:** 1.0  **Date:** 28 October 2026
 
@@ -22,7 +19,7 @@ Large volumes of identity documents (passports), financial records and some **sp
 - **Systems:** DigitalOcean server in London (portal, database, virus scanner); Microsoft OneDrive (documents and
   encrypted nightly database backups); Hostinger email (notifications); AI language model provider (see below).
 - **Volume:** about 100 clients per year; documents per client ~10–20.
-- **Retention:** [to be set — see section 6, risk R7].
+- **Retention:** 6 years after case closure (configurable per firm); see R7.
 - **AI features (when `AI_PROVIDER` is not `"off"`):** three AI-powered features send document text to a language-model provider:
   - *Document analysis* — caseworker asks a question; the AI reads uploaded document text and returns a sourced answer (staff-only, never shown to clients).
   - *Document checks* — background job reads each uploaded document and flags expiry dates, names, and format issues (staff-only).
@@ -42,8 +39,7 @@ Large volumes of identity documents (passports), financial records and some **sp
 - Mobile number optional; no SMS; no tracking or advertising cookies.
 - Access limited by role (client → own case; caseworker → own clients; admin → firm).
 - Lawful bases as set out in the privacy notice: contract, legal obligation and legitimate interests (Article 6(1)(b), (c), (f)); special category data under Article 9(2)(f) (legal claims and legal advice). Confirmed by Hamza Tahir.
-- Clients are told what each document is for (one sentence per item) and given a privacy notice [link to be added
-  to the portal sign-in and account-creation pages once approved].
+- Clients are told what each document is for (one sentence per item) and given a privacy notice linked from the portal sign-in and account-creation pages.
 
 ## 5. Risks and measures
 
@@ -72,7 +68,7 @@ Large volumes of identity documents (passports), financial records and some **sp
 
 - [x] Retention periods set (R7): 6 years after case closure (configurable). Automatic deletion with 30-day admin warning email, early-delete, extend, and legal-hold controls. Privacy notice updated.
 - [x] Microsoft 365 Personal kept (R6), accepted as a residual risk. Required safeguards: 2FA and a strong unique password on the Microsoft account, owner-only access, encrypted nightly backups. 2FA confirmed switched on (29 October 2026).
-- [ ] Approve and publish the privacy notice (now includes partner/sponsor and AI sections); link it in the portal.
+- [x] Privacy notice published at /privacy and linked from the portal sign-in, create-account, reset-password, partner consent, and staff sign-in pages.
 - [x] Partner/sponsor information — R10 resolved by direct-invite design with in-portal privacy notice. R14 added and mitigated.
 - [x] ICO registration confirmed: Uha Legal Limited, ZC187130 (registered 1 July 2026, renew by 30 June 2027).
 - [x] Article 9 condition confirmed: 9(2)(f) legal claims and legal advice (Hamza Tahir).

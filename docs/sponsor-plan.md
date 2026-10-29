@@ -447,8 +447,8 @@ Same endpoint (`PATCH /api/staff/documents/[id]/assign`), body `{ filesShared: b
 | **`components/SponsorPortal.tsx`** | **New.** Privacy-notice banner; SPONSOR-assigned doc list; no messages or timeline. |
 | `components/ClientPortal.tsx` | Detect `isSponsor` → render `<SponsorPortal>`. |
 | `components/StaffPortal.tsx` | Case view: sponsor card (invite form, status, cancel, visibleToClient). Per-doc: assignment dropdown, filesShared toggle. Route editor: assignedTo toggle per checklist item. |
-| `docs/dpia-DRAFT.md` | R10 → resolved. Add R14 (see §12). |
-| `docs/privacy-notice-DRAFT.md` | Add "If you are a partner or sponsor" section (see §12). |
+| `docs/dpia.md` | R10 → resolved. Add R14 (see §12). |
+| `docs/privacy-notice.md` | Add "If you are a partner or sponsor" section (see §12). |
 | `tests/sponsor.test.ts` | **New.** Unit tests for `lib/sponsor.ts` pure functions. |
 | `tests/cases.test.ts` | `createSponsor` unit tests. |
 | `tests/documents.test.ts` | `uploadDocument` and `reportMissing` sponsor-path tests. |
@@ -458,7 +458,7 @@ Same endpoint (`PATCH /api/staff/documents/[id]/assign`), body `{ filesShared: b
 
 ## 12. Privacy document changes
 
-### `docs/dpia-DRAFT.md`
+### `docs/dpia.md`
 
 **R10** — replace the "Medium — action needed" entry:
 
@@ -470,7 +470,7 @@ Remove the action `[ ] Partner/sponsor information (R10)` from §6 and replace w
 
 | R14 | Sponsor sees main client's documents, or vice versa | Possible / High | `resolvedOwner()` gates every read and upload; `visibleToClient` and `filesShared` are opt-in, caseworker-only, and audit-logged; `visibleCases()` excludes sponsor rows from all staff queries; automated e2e tests prove isolation | Low |
 
-### `docs/privacy-notice-DRAFT.md`
+### `docs/privacy-notice.md`
 
 Add after the "What the portal collects" table:
 

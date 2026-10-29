@@ -266,3 +266,15 @@ button.row:hover { background: var(--teal-tint); }
 .msg-closed { }
 .msg-form { display: flex; flex-direction: column; gap: 10px; border-top: 1px solid var(--rule); padding-top: 16px; }
 .msg-input { resize: vertical; min-height: 80px; }
+
+/* ---------- privacy notice page ---------- */
+.privacy { max-width: 720px; font-size: 1rem; }
+.privacy-back { margin-bottom: 8px; font-size: .9rem; }
+.privacy h1 { font-size: 2rem; margin-bottom: 4px; }
+.privacy h2 { font-size: 1.3rem; margin-top: 8px; }
+.privacy p { margin-bottom: 4px; }
+.privacy ul { margin: 0; padding-left: 1.4em; display: flex; flex-direction: column; gap: 4px; }
+.privacy table { border-collapse: collapse; width: 100%; font-size: .9rem; }
+.privacy th, .privacy td { border: 1px solid var(--rule); padding: 8px 10px; text-align: left; vertical-align: top; }
+.privacy th { background: var(--card); font-weight: 600; }
+.privacy-link { font-size: .85rem; color: var(--grey); }

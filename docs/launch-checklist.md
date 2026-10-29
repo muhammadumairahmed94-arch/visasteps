@@ -66,8 +66,8 @@ Variables with safe production defaults not listed above: `SMTP_HOST` (smtp.host
 - [ ] Brief caseworkers: AI verdicts are suggestions, not decisions; always review the source documents
 
 ## Legal and data protection
-- [ ] Privacy notice reviewed by a lawyer and published (docs/privacy-notice-DRAFT.md, now includes AI section) — link added to the portal sign-in and account-creation pages
-- [ ] DPIA completed and signed (docs/dpia-DRAFT.md), including Microsoft 365 Personal (R6) and AI provider (R17)
+- [x] Privacy notice published at /privacy (docs/privacy-notice.md) and linked from sign-in, create-account, reset-password, sponsor consent, and staff sign-in pages
+- [x] DPIA completed and signed (docs/dpia.md); R6 accepted, R7 resolved; AI features gated on R17 (see AI features below)
 - [ ] Retention periods decided
 - [x] ICO registration confirmed: ZC187130, expires 30 June 2027 (renew before then)
 

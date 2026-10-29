@@ -1,9 +1,3 @@
-# ⚠️ DRAFT — NOT FOR PUBLICATION UNTIL REVIEWED AND APPROVED BY A QUALIFIED LAWYER ⚠️
-
-> Prepared by an AI assistant from how the portal is built. It is a starting point, not legal advice.
-> Items in **[square brackets]** must be completed or confirmed by UHA Legal. Check in particular which
-> data-protection laws apply (UK GDPR, and Pakistan's law if relevant) and whether the ICO registration is in place.
-
 # Client portal privacy notice — UHA Legal
 
 **Last updated:** 28 October 2026
@@ -56,9 +50,6 @@ We do not use cookies for advertising or tracking. The portal uses one essential
 | Microsoft (OneDrive) | Storage of uploaded documents and encrypted database backups | Microsoft 365 Personal. Microsoft decides where this is stored, which may be outside the UK. Access is protected by two-step sign-in and backups are encrypted. |
 | Hostinger | Sending emails (invitations, reminders) | United Kingdom |
 
-[If any provider stores data outside the UK, describe the safeguard, e.g. adequacy regulations or the UK
-International Data Transfer Agreement.]
-
 We share information with UK Visas and Immigration and other authorities only as part of your application,
 with your instructions, or where the law requires it.
 
@@ -80,21 +71,9 @@ The partner's personal data (email address, uploaded documents, sign-in records,
 
 We keep your case documents and records for 6 years after your case closes, as required by our regulator, then delete them securely. Backups are deleted within a further 30 days.
 
-## AI-assisted document review
+## AI tools
 
-To help our caseworkers work accurately and quickly, your uploaded documents may be read by an AI service.
-
-The AI is used only by our caseworkers, never to give you advice directly. Here is what it does:
-
-- It reads the text in your documents and flags things like expiry dates, names and document type.
-- It checks whether the documents you have sent meet the immigration rules for your visa route.
-- It can answer a caseworker's question about your case using text it finds in your documents.
-
-A qualified caseworker reviews every AI finding and makes the final decision. No decision about your case is made by the AI alone.
-
-The AI service we use is **[AWS Bedrock in Amazon's London data centre / Anthropic — confirm which]**. The provider does not use your data to train its AI models. Document text is sent only for the purpose of the analysis above and is not stored by the provider after the response is returned.
-
-You can ask us to have your case reviewed without any AI tools. Email info@uhalegal.com.
+We do not currently use AI tools on your documents. If we start to, we will update this notice before doing so.
 
 ## How we protect it
 
@@ -106,8 +85,7 @@ own case; an audit log of every view, upload and change; encrypted nightly backu
 
 You can ask for a copy of your data, to correct it, to delete it (subject to our legal duties to keep
 records), to restrict or object to its use, and for data portability. Contact info@uhalegal.com.
-You can complain to the **Information Commissioner's Office** (ico.org.uk, 0303 123 1113). [Add any other
-applicable authority.]
+You can complain to the **Information Commissioner's Office** (ico.org.uk, 0303 123 1113).
 
 ## Changes
 

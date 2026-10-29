@@ -89,6 +89,7 @@ export default function ClientSignIn({ token, onDone }: { token?: string; onDone
           <RememberMe />
           {err}
           <button className="big" disabled={busy}>{busy ? "Creating account…" : "Create account"}</button>
+          <p className="privacy-link">By creating an account you have read our <a href="/privacy" target="_blank" rel="noopener noreferrer">privacy notice</a>.</p>
         </form>
       </>
     );
@@ -107,6 +108,7 @@ export default function ClientSignIn({ token, onDone }: { token?: string; onDone
           <RememberMe />
           {err}
           <button className="big" disabled={busy}>{busy ? "Saving…" : "Save and sign in"}</button>
+          <p className="privacy-link"><a href="/privacy" target="_blank" rel="noopener noreferrer">Privacy notice</a></p>
         </form>
       </>
     );
@@ -239,6 +241,7 @@ export default function ClientSignIn({ token, onDone }: { token?: string; onDone
         <button type="button" className="link" onClick={() => go({ kind: "forgot" })}>Forgot password?</button>
         <button type="button" className="link" onClick={() => go({ kind: "otpRequest" })}>Email me a sign-in code instead</button>
         <p className="muted">New client? Use the invitation link sent by email to create an account.</p>
+        <p className="privacy-link"><a href="/privacy" target="_blank" rel="noopener noreferrer">Privacy notice</a></p>
       </form>
     </>
   );

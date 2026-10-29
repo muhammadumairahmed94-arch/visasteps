@@ -162,6 +162,7 @@ export default function StaffSignIn({ onDone, initial }: { onDone: () => void; i
         </div>
         {err}
         <button className="big" disabled={busy}>{busy ? "Signing in…" : "Continue"}</button>
+        <p className="privacy-link"><a href="/privacy" target="_blank" rel="noopener noreferrer">Privacy notice</a></p>
       </form>
     </>
   );
