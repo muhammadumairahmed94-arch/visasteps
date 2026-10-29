@@ -1504,6 +1504,11 @@ test.describe.serial("F: Retention and legal hold (API-only)", () => {
   });
 
   test("F2: GET /api/admin/retention returns 403 for client session", async ({ playwright }) => {
+    // Temporarily reopen the case so Amina can log in (login is blocked for closed cases)
+    await sharedStaffPage.request.post(
+      `/api/staff/cases/${closedClientId}/close`,
+      { headers: mutHeaders, data: JSON.stringify({ closed: false }) },
+    );
     const ctx = await playwright.request.newContext({ baseURL: E2E.APP_URL, extraHTTPHeaders: { Origin: E2E.APP_URL } });
     const loginRes = await ctx.post("/api/auth/client/login", {
       data: { email: "amina.khan@example.com", password: E2E.SEED_CLIENT_PASSWORD },
@@ -1512,12 +1517,17 @@ test.describe.serial("F: Retention and legal hold (API-only)", () => {
     const retRes = await ctx.get("/api/admin/retention");
     expect(retRes.status()).toBe(403);
     await ctx.dispose();
+    // Re-close so subsequent tests have a closed case to work with
+    await sharedStaffPage.request.post(
+      `/api/staff/cases/${closedClientId}/close`,
+      { headers: mutHeaders, data: JSON.stringify({ closed: true }) },
+    );
   });
 
   test("F3: PATCH /api/admin/retention/[id] extends retention", async () => {
     const res = await sharedStaffPage.request.patch(
       `/api/admin/retention/${closedClientId}`,
-      { headers: mutHeaders, data: JSON.stringify({ extraYears: 1 }) },
+      { headers: mutHeaders, data: JSON.stringify({ extraYears: 1, reason: "E2E test extension" }) },
     );
     expect(res.status()).toBe(200);
     const body = await res.json() as { message: string };
